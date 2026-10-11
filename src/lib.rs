@@ -1,5 +1,6 @@
 //! rvt_core: hot core of the Revit file reader (own code; Python implementation in ~/rvt-research is the reference oracle).
 //! Stage 1: page stripping, gzip-member spans/inflate (parallel), element-header candidate scan.
+mod decoder;
 use flate2::read::DeflateDecoder;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -112,5 +113,6 @@ fn rvt_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(strip_pages, m)?)?;
     m.add_function(wrap_pyfunction!(joined, m)?)?;
     m.add_function(wrap_pyfunction!(header_candidates, m)?)?;
+    m.add_class::<decoder::RecDecoder>()?;
     Ok(())
 }
