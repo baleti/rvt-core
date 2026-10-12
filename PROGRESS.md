@@ -25,3 +25,12 @@ Next: element_mesh in Rust, params, binary cache, README timings.
 - binary cache (.rvtc extraction, .pk packed params/meshes/table), two-stage extraction (quick table + full model from one decode), Model / MeshStream / Progress.
 - dev/ vs released python/ (release.sh with smoke diffs) because 176's processes import python/ live.
 - Corpus suites running (tests/run_all.sh, then tests/run_more.sh): extract want_all identical on every file finished so far.
+
+## 2026-10-12 evening (c4-rust, new account)
+- remote-host suites (released builds of 13:50-19:00): params 70/70 identical (8 rme files killed at the 6 GB per-file cap), extract want_all 76/76, default 26/26, slim 25/25 identical, mesh 24/26 OK (Facades: set-order cases).
+  h1_suite.sh: one scoped process per file (resumable), logs in remote-host:~/h1logs/rvt-core (logs/ inside src was overwritten by other agents' h1run sync).
+- Ported reference changes: per-triangle `mat` (viewer request 14; keys resolved by the reference _material_of), nearly_closed per-node rule (was missing), loopless faces judged by own tessellation,
+  nid 1e9 for bbox planes, params (stored_params, slot guard in the Rust MAPPING loop, Slope, analytical/column Length, curtain panel cells, MaterialElem, enum rules),
+  23:10 curved-face refinement (rect_grid / refine_curved) and dup-body style rule. Reference _cycles_from_polylines now sorted (my request) -> meshes bit-identical (300/300 on Facades, rst_basic, Residential).
+- Safety: params drift guard (a different rvt_params.py runs the reference loop with Rust kernels), adapter source in the cache key, python sources in pysrc/ (python/ only via release.sh), K::k debug assert.
+- refined_volume in Rust (viewer item 13 root cause = topology_check): Facades 141 curved meshes 34 s -> 0.6 s, equal to 1e-9.
