@@ -300,7 +300,12 @@ def _with_mat(doc, r, compact):
     if r is None or 'mat_keys' not in r: return r
     import rvt_elemmesh as EM
     keys = r.pop('mat_keys'); idx = r.pop('mat_idx')
-    vals = [EM._material_of(doc, rs, ns) for rs, ns in keys]
+    mc = doc.__dict__.setdefault('_matk', {})                 # key -> material, in front of the reference's own memo
+    vals = []
+    for k in keys:
+        v = mc.get(k)
+        if v is None: v = mc[k] = EM._material_of(doc, *k)
+        vals.append(v)
     if compact:
         import numpy as np
         r['mat'] = np.array(vals + [-1], dtype=np.int64)[idx] if len(idx) else np.zeros(0, np.int64)

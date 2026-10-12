@@ -39,6 +39,8 @@ fn tri_mats(kk: &K, t: &Tess, g: &Val, keys: &mut Vec<(Val, Val)>, face_key: &mu
     t.fidx.iter().map(|&f| {
         *face_key.entry(f).or_insert_with(|| {
             let rs = if f >= 1 { t.frs.get((f - 1) as usize).cloned().unwrap_or(Val::None) } else { Val::None };
+            // one entry per distinct key (faces of one node mostly share a style)
+            if let Some(i) = keys.iter().position(|k| k.0 == rs && k.1 == ns) { return i as i32; }
             keys.push((rs, ns.clone())); (keys.len() - 1) as i32
         })
     }).collect()
