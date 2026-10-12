@@ -444,6 +444,7 @@ def _params_impl(path, x):
     fu = RC.ifc_from_unique
     def _sg(v):
         v = int(v); return v - (1 << 64) if v >= 1 << 63 else (v - (1 << 32) if 1 << 31 <= v < 1 << 32 else v)
+    ENUM = P.ENUM; PN = P.PNAMES
     for eid, r in recs.items():
         c = r['class']; f = r['fields']; d = src.apply(eid, c)
         d.update(P.stored_params(f, by_name=True))
@@ -451,6 +452,10 @@ def _params_impl(path, x):
         for k, (v0, vi, vs, ve) in F.named_values(f, cap, sym).items():
             if isinstance(v0, (int, float)): d.setdefault(k, float(v0))
         if c in ('RbsPipeCurve', 'RbsDuctCurve', 'RbsConduitCurve', 'CableTray'): d.update(Gm.mep_curve(f, c, lv))
+        elif c == 'MaterialElem':
+            mt = F.S_(f, 'm_pMaterial') or {}
+            for k_, nm_ in (('m_transparency', 'Transparency'), ('m_smoothness', 'Smoothness'), ('m_shininess', 'Shininess')):
+                if isinstance(mt.get(k_), (int, float)) and not isinstance(mt.get(k_), bool): d[nm_] = int(round(mt[k_] * 100)) if isinstance(mt[k_], float) else mt[k_]
         elif c == 'FamilyInstance':
             d.update(Gm.fam_instance(f, lv))
             if sym is not None and 'm_isHostPanelSym' in sym:
@@ -475,6 +480,16 @@ def _params_impl(path, x):
             d['UniqueId'] = uid[eid]; d['IfcGUID'] = st.get(eid) or fu(uid[eid])
             o = own.get(eid)
             if not st.get(eid) and c.endswith('CenterLine') and o is not None and o in uid: d['IfcGUID'] = st.get(o) or fu(uid[o])
+        for bip, ru in ENUM.get(c, {}).items():
+            nm = PN.get(bip)
+            if nm is None or nm in d: continue
+            if 'const' in ru: v = P._cast(*ru['const'])
+            else:
+                import learn_enum as _LE
+                k = _LE._key(src.resolve(eid, ru['via'], ru['path']))
+                hit = ru['table'].get(k) if k is not None else None
+                v = P._cast(*hit) if hit else None
+            if v is not None: d[nm] = v
         out[eid] = {'class': c, 'params': d}
     for eid, o in list(out.items()):
         if o['class'] == 'FamilyInstance' and 'Length' in o['params']:
@@ -483,7 +498,7 @@ def _params_impl(path, x):
     return out
 
 # sha1 of the rvt_params.py whose params() loop _params_impl mirrors; any other version runs the reference loop (with the Rust kernels) instead
-PARAMS_PORTED = 'b3bf0cd8dc7e89faca1958be6c4a08f8ea1ac47c'
+PARAMS_PORTED = 'fc7a6feef8f40c2833ff0cd2f6ea582c5a93f159'
 def _params_drift():
     import hashlib
     try: return hashlib.sha1(open(os.path.join(READER, 'rvt_params.py'), 'rb').read()).hexdigest() != PARAMS_PORTED
