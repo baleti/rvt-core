@@ -146,11 +146,13 @@ def reader_version():
     fs = ['rvt_decode.py', 'rvt_entities.py', 'rvt_scan.py', 'rvt_es.py', 'fmt_parser.py', 'rvtfmt.py', 'rvt2text.py', 'rvt_inventory.py']
     st = tuple((f, os.stat(os.path.join(READER, f)).st_mtime_ns) for f in fs if os.path.exists(os.path.join(READER, f)))
     so = os.path.join(HERE, 'rvt_core.abi3.so'); sst = os.stat(so) if os.path.exists(so) else None
-    k = (st, sst and (sst.st_size, sst.st_mtime_ns))
+    me = os.stat(os.path.abspath(__file__)).st_mtime_ns                   # this adapter's own code (Python-side ports) is part of the key too
+    k = (st, sst and (sst.st_size, sst.st_mtime_ns), me)
     if k not in _RV:
         h = hashlib.sha1()
         for f, _ in st: h.update(open(os.path.join(READER, f), 'rb').read())
         if sst: h.update(open(so, 'rb').read())
+        h.update(open(os.path.abspath(__file__), 'rb').read())
         _RV.clear(); _RV[k] = h.hexdigest()[:16]
     return _RV[k]
 
@@ -412,7 +414,7 @@ def resolve(src, rid, via, path):
 
 def _params_impl(path, x):
     """rvt_params.params(path) with x = the extraction: the reference loop line by line, MAPPING loop / resolve / IfcGUID in Rust (tests/diff_params.py)"""
-    import rvt_params as P, rvt_map2 as M, rvt_famparams as F, rvt_geom as Gm, rvt_uid, ifcguid, rvt_entities as E, rvt_decode as D, rvt_scan as S
+    import math, rvt_params as P, rvt_map2 as M, rvt_famparams as F, rvt_geom as Gm, rvt_uid, ifcguid, rvt_entities as E, rvt_decode as D, rvt_scan as S
     RC = _rc()
     recs = {}
     for (eid, c), r in x['recs'].items(): recs.setdefault(eid, r)
@@ -432,14 +434,26 @@ def _params_impl(path, x):
         v = int(v); return v - (1 << 64) if v >= 1 << 63 else (v - (1 << 32) if 1 << 31 <= v < 1 << 32 else v)
     for eid, r in recs.items():
         c = r['class']; f = r['fields']; d = src.apply(eid, c)
+        d.update(P.stored_params(f, by_name=True))
         sid = F.S_(f, 'm_pInstanceInfo', 'm_symbolId'); sym = recs.get(int(sid), {}).get('fields') if sid is not None else None
         for k, (v0, vi, vs, ve) in F.named_values(f, cap, sym).items():
             if isinstance(v0, (int, float)): d.setdefault(k, float(v0))
         if c in ('RbsPipeCurve', 'RbsDuctCurve', 'RbsConduitCurve', 'CableTray'): d.update(Gm.mep_curve(f, c, lv))
-        elif c == 'FamilyInstance': d.update(Gm.fam_instance(f, lv))
+        elif c == 'FamilyInstance':
+            d.update(Gm.fam_instance(f, lv))
+            if sym is not None and 'm_isHostPanelSym' in sym:
+                w = F.S_(sym, 'm_refs'); w = F.S_(w[0], 'm_width') if isinstance(w, list) and w else None
+                h = F.S_(sym, 'm_refs'); h = F.S_(h[0], 'm_height') if isinstance(h, list) and h else None
+                if isinstance(w, float) and isinstance(h, float):
+                    d['Width'], d['Height'] = w, h
+                    if w > 0 and h > 0: d['Area'] = w * h
+                if sym.get('m_isHostPanelSym') == 1: d['Volume'] = 0.0
         elif c == 'SWall' or c.endswith('CenterLine') or c == 'CurveElem' or c.startswith('AnalyticalModel'):
             cu = Gm.primary_curve(f)
             if cu is not None and Gm.curve_length(cu) is not None: d['Length'] = Gm.curve_length(cu)
+            ud = ((f.get('m_data') or {}).get('m_oUserData') or {}) if isinstance(f.get('m_data'), dict) else {}
+            ud = ud.get('obj') if isinstance(ud, dict) and 'obj' in ud else ud
+            if isinstance(ud, dict) and isinstance(ud.get('m_angle'), float): d['Slope'] = math.tan(ud['m_angle'])
         hf = x['eh'].get(eid) or {}
         if UNIV: cid = hf.get('m_categroryId'); d['Category|ElementId'] = _sg(cid) if cid is not None else -1
         dop = hf.get('m_designOptionId', f.get('m_designOptionId')); dop = _sg(dop) if dop is not None else -1
@@ -450,14 +464,25 @@ def _params_impl(path, x):
             o = own.get(eid)
             if not st.get(eid) and c.endswith('CenterLine') and o is not None and o in uid: d['IfcGUID'] = st.get(o) or fu(uid[o])
         out[eid] = {'class': c, 'params': d}
+    for eid, o in list(out.items()):
+        if o['class'] == 'FamilyInstance' and 'Length' in o['params']:
+            am = F.S_(recs[eid]['fields'], 'm_oFamInstUserData', 'm_analyticalModelId')
+            if am is not None and int(am) in out and out[int(am)]['class'].startswith('AnalyticalModel'): out[int(am)]['params'].setdefault('Length', o['params']['Length'])
     return out
+
+# sha1 of the rvt_params.py whose params() loop _params_impl mirrors; any other version runs the reference loop (with the Rust kernels) instead
+PARAMS_PORTED = 'b3bf0cd8dc7e89faca1958be6c4a08f8ea1ac47c'
+def _params_drift():
+    import hashlib
+    try: return hashlib.sha1(open(os.path.join(READER, 'rvt_params.py'), 'rb').read()).hexdigest() != PARAMS_PORTED
+    except Exception: return True
 
 _PLOCK = __import__('threading').Lock()
 def params(path, x=None):
     """== rvt_params.params(path): the reference code, with its three hot kernels (Src/resolve/rvt_ifc.stored) running in Rust"""
     import rvt_params as P, rvt_map2 as M, rvt_ifc
     if not on(): return P.params(path)
-    if not os.environ.get('RVT_CORE_PARAMS_PATCH'):
+    if not os.environ.get('RVT_CORE_PARAMS_PATCH') and not os.environ.get('RVT_PARAMS_GEOM') and not _params_drift():
         import gc
         if x is None: x = extract(path, want_all=True)
         gc_was = gc.isenabled(); gc.disable()

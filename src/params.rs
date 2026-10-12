@@ -115,14 +115,20 @@ pub struct FlatSrc {
     eid_t: Py<PyAny>,
     cache: Mutex<FxHashMap<i128, std::sync::Arc<Flat>>>,
     /// compiled rvt_params MAPPING: class -> [(parameter name, candidates)]
-    mapping: FxHashMap<String, Vec<(PyObject, Vec<Cand>)>>,
+    mapping: FxHashMap<String, Vec<(PyObject, Vec<(Slot, Cand)>)>>,
     sent: Vec<i128>,
+    pnames: Option<Py<PyDict>>,
 }
 
 enum Cand {
     Default(PyObject),
     Res(String, String),
 }
+
+/// positional parameter-set slot guard of a candidate: (via, path of the slot's m_paramId, int(pid))
+type Slot = Option<(String, String, Option<i128>)>;
+
+fn sid(v: i128) -> i128 { if v >= 1 << 63 { v - (1 << 64) } else if (1 << 31..1 << 32).contains(&v) { v - (1 << 32) } else { v } }
 
 impl FlatSrc {
     fn flat_(&self, py: Python<'_>, rid: &Bound<'_, PyAny>) -> PyResult<std::sync::Arc<Flat>> {
@@ -148,7 +154,7 @@ impl FlatSrc {
     #[pyo3(signature = (last, hdr=None, eid_type=None))]
     fn new(py: Python<'_>, last: Py<PyDict>, hdr: Option<Py<PyDict>>, eid_type: Option<Py<PyAny>>) -> PyResult<Self> {
         let eid_t = match eid_type { Some(t) => t, None => py.import_bound("rvt_decode")?.getattr("EID")?.unbind() };
-        Ok(FlatSrc { last, hdr: hdr.unwrap_or_else(|| PyDict::new_bound(py).unbind()), eid_t, cache: Mutex::new(FxHashMap::default()), mapping: FxHashMap::default(), sent: vec![] })
+        Ok(FlatSrc { last, hdr: hdr.unwrap_or_else(|| PyDict::new_bound(py).unbind()), eid_t, cache: Mutex::new(FxHashMap::default()), mapping: FxHashMap::default(), sent: vec![], pnames: None })
     }
 
     /// == Src.flat(rid) -> (out, eids) as new dicts
@@ -230,16 +236,24 @@ impl FlatSrc {
                 for cd in cands.iter()? {
                     let cd = cd?;
                     let cd = cd.downcast::<PyDict>()?;
-                    if let Some(dv) = cd.get_item("default")? { cl.push(Cand::Default(dv.unbind())); continue; }
                     let via: String = match cd.get_item("via")? { Some(x) => x.extract()?, None => String::new() };
-                    let path: String = cd.get_item("path")?.ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("path"))?.extract()?;
-                    cl.push(Cand::Res(via, path));
+                    let path0: String = match cd.get_item("path")? { Some(x) => x.extract()?, None => String::new() };
+                    // positional slots of the stored parameter sets shift per element: use a slot only when it holds this parameter
+                    let mut slot: Slot = None;
+                    if path0.contains("m_pParamValueSet") {
+                        if pids == "NAME" || !path0.ends_with(".m_value") { continue; }
+                        slot = Some((via.clone(), format!("{}.m_paramId", &path0[..path0.len() - ".m_value".len()]), pids.trim().parse::<i128>().ok()));
+                    }
+                    if let Some(dv) = cd.get_item("default")? { cl.push((slot, Cand::Default(dv.unbind()))); continue; }
+                    if cd.get_item("path")?.is_none() { return Err(pyo3::exceptions::PyKeyError::new_err("path")); }
+                    cl.push((slot, Cand::Res(via, path0)));
                 }
                 v.push((nm, cl));
             }
             self.mapping.insert(c, v);
         }
         self.sent = sent;
+        self.pnames = Some(pnames.clone().unbind());
         Ok(())
     }
 
@@ -248,7 +262,18 @@ impl FlatSrc {
         let d = PyDict::new_bound(py);
         let m = match self.mapping.get(cls) { Some(m) => m, None => return Ok(d) };
         for (nm, cands) in m {
-            for cd in cands {
+            for (slot, cd) in cands {
+                if let Some((sv, sp, pid)) = slot {
+                    let v = self.resolve(py, rid, sv, sp)?;
+                    let vb = v.bind(py);
+                    if vb.is_none() { continue; }
+                    let iv: i128 = sid(py.get_type_bound::<PyInt>().call1((vb,))?.extract()?);
+                    let pid = pid.ok_or_else(|| pyo3::exceptions::PyValueError::new_err("invalid literal for int()"))?;
+                    if iv != pid {
+                        let other = match &self.pnames { Some(pn) => pn.bind(py).get_item(iv.to_string())?, None => None };
+                        if let Some(o) = other { if !o.is_none() && !o.eq(nm.bind(py))? { continue; } }
+                    }
+                }
                 match cd {
                     Cand::Default(v) => { d.set_item(nm.bind(py), v.bind(py))?; break; }
                     Cand::Res(via, path) => {
