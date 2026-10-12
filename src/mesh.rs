@@ -1297,10 +1297,16 @@ pub fn tessellate(kk: &K, faces: &[&Val], edges: &EdgeMap, earcut: Earcut) -> Rs
     for j in jobs {
         match j {
             Job::Tris(v) => { for (t, m, f) in v { out.tris.push(t); out.meta.push(m); out.fidx.push(f); } }
-            Job::Ear { verts, nf, kind, ev, drop_degenerate, .. } => {
+            Job::Ear { mut verts, ends, nf, kind, ev, drop_degenerate } => {
                 let r = res.get(ri).cloned().flatten();
                 ri += 1;
-                let idx = match r { Some(i) => i, None => { out.unsup.push("earcut"); continue; } };
+                let mut idx = match r { Some(i) => i, None => { out.unsup.push("earcut"); continue; } };
+                // curved face (general loop path, single loop): the emitted triangles must follow the surface (reference: _rect_grid / refine_curved)
+                if !drop_degenerate && kind.name() != "plane" && ends.len() == 1 && std::env::var_os("RVT_NOREFINE").map_or(true, |x| x.is_empty()) {
+                    let (nv, tl) = match rect_grid(&verts, &ev, 48) { Some(g) => g, None => refine_curved(&verts, &idx, &ev, 2e-3, 1e-3, 4000) };
+                    verts = nv;
+                    idx = tl.iter().flat_map(|x| [x[0] as u32, x[1] as u32, x[2] as u32]).collect();
+                }
                 let p: Vec<V3> = verts.iter().map(|q| ev.eval(q[0], q[1])).collect();
                 for k in (0..idx.len() / 3 * 3).step_by(3) {
                     let (i0, i1, i2) = (idx[k] as usize, idx[k + 1] as usize, idx[k + 2] as usize);
@@ -1611,4 +1617,123 @@ pub fn nearly_closed(tris: &[Tri], frac: f64, min_tris: usize) -> bool {
     if tris.len() < min_tris { return false; }
     if tjunction_closed(tris, 5e-5) { return true; }
     (mesh_open_edges(tris, 5e-5) as f64) <= frac * 1.5 * tris.len() as f64
+}
+
+/// Python round(x, 8) (correctly rounded decimal, parsed back)
+fn round8(x: f64) -> f64 { format!("{:.8}", x).parse::<f64>().unwrap_or(x) }
+
+/// rvt_mesh._rect_grid: a curved face whose uv loop is its uv rectangle -> structured grid through the loop's own border samples; None otherwise
+pub fn rect_grid(verts: &[UV], ev: &Surf, max_n: usize) -> Option<(Vec<UV>, Vec<[usize; 3]>)> {
+    if verts.is_empty() { return None; }
+    let (mut u0, mut v0, mut u1, mut v1) = (verts[0][0], verts[0][1], verts[0][0], verts[0][1]);
+    for q in verts { u0 = u0.min(q[0]); v0 = v0.min(q[1]); u1 = u1.max(q[0]); v1 = v1.max(q[1]); }
+    if u1 - u0 < 1e-9 || v1 - v0 < 1e-9 { return None; }
+    let tb = 1e-6 * (1.0f64).max((u1 - u0).abs()).max((v1 - v0).abs());
+    if !verts.iter().all(|q| (q[0] - u0).abs() < tb || (q[0] - u1).abs() < tb || (q[1] - v0).abs() < tb || (q[1] - v1).abs() < tb) { return None; }
+    let ar = area2(verts);
+    let rect = (u1 - u0) * (v1 - v0);
+    if (ar.abs() - rect).abs() > 1e-6 * rect + 1e-12 { return None; }
+    let set = |it: Vec<f64>| -> Vec<f64> { let mut v = it; v.sort_by(|a, b| a.partial_cmp(b).unwrap()); v.dedup_by(|a, b| a.to_bits() == b.to_bits() || *a == *b); v };
+    let ub0 = set(verts.iter().filter(|q| (q[1] - v0).abs() < tb).map(|q| round8(q[0])).chain([round8(u0), round8(u1)]).collect());
+    let ub1 = set(verts.iter().filter(|q| (q[1] - v1).abs() < tb).map(|q| round8(q[0])).chain([round8(u0), round8(u1)]).collect());
+    let vb0 = set(verts.iter().filter(|q| (q[0] - u0).abs() < tb).map(|q| round8(q[1])).chain([round8(v0), round8(v1)]).collect());
+    let vb1 = set(verts.iter().filter(|q| (q[0] - u1).abs() < tb).map(|q| round8(q[1])).chain([round8(v0), round8(v1)]).collect());
+    if vb0 != vb1 { return None; }
+    let thin = |l: &[f64]| -> Vec<f64> { let mut o = vec![l[0]]; for &x in &l[1..] { if x - o[o.len() - 1] > 1e-9 { o.push(x); } } o };
+    let (a0, a1, vs) = (thin(&ub0), thin(&ub1), thin(&vb0));
+    let nv = vs.len() - 1;
+    if nv < 1 || nv > max_n || a0.len() - 1 > 4 * max_n || a1.len() - 1 > 4 * max_n { return None; }
+    let pos = ar > 0.0;
+    let mut vv: Vec<UV> = vec![];
+    let mut rows: Vec<Vec<usize>> = vec![];
+    for (jj, &v) in vs.iter().enumerate() {
+        let mut a = if jj * 2 < nv || jj == 0 { &a0 } else { &a1 };
+        if jj == nv { a = &a1; }
+        rows.push((0..a.len()).map(|k| vv.len() + k).collect());
+        for &u in a.iter() { vv.push([u, v]); }
+    }
+    let mut t: Vec<[usize; 3]> = vec![];
+    for jj in 0..nv {
+        let (r0, r1) = (&rows[jj], &rows[jj + 1]);
+        let (mut i0, mut i1) = (0usize, 0usize);
+        while i0 < r0.len() - 1 || i1 < r1.len() - 1 {
+            let adv0 = i1 >= r1.len() - 1 || (i0 < r0.len() - 1 && vv[r0[i0 + 1]][0] <= vv[r1[i1 + 1]][0]);
+            let tr = if adv0 { let x = [r0[i0], r0[i0 + 1], r1[i1]]; i0 += 1; x } else { let x = [r0[i0], r1[i1 + 1], r1[i1]]; i1 += 1; x };
+            t.push(if pos { tr } else { [tr[0], tr[2], tr[1]] });
+        }
+    }
+    let p: Vec<V3> = vv.iter().map(|q| ev.eval(q[0], q[1])).collect();
+    t.retain(|x| norm(sub(p[x[0]], p[x[1]])).min(norm(sub(p[x[1]], p[x[2]]))).min(norm(sub(p[x[0]], p[x[2]]))) > 1e-9);
+    Some((vv, t))
+}
+
+/// rvt_mesh.refine_curved: conforming refinement of an earcut triangulation of a curved face (interior edges bisected where the chord leaves the surface,
+/// loop-only triangles get their centroid); loop never changed
+pub fn refine_curved(verts: &[UV], idx: &[u32], ev: &Surf, rel_tol: f64, abs_tol: f64, max_tris: usize) -> (Vec<UV>, Vec<[usize; 3]>) {
+    let mut v: Vec<UV> = verts.to_vec();
+    let mut t: Vec<[usize; 3]> = (0..idx.len() / 3).map(|k| [idx[3 * k] as usize, idx[3 * k + 1] as usize, idx[3 * k + 2] as usize]).collect();
+    if t.is_empty() { return (v, t); }
+    let mut p: Vec<V3> = v.iter().map(|q| ev.eval(q[0], q[1])).collect();
+    let (mut lo, mut hi) = (p[0], p[0]);
+    for q in &p { for k in 0..3 { lo[k] = lo[k].min(q[k]); hi[k] = hi[k].max(q[k]); } }
+    let tol = abs_tol.max(rel_tol * norm(sub(hi, lo)));
+    let nloop = v.len();
+    let ek = |a: usize, b: usize| -> (usize, usize) { (a.min(b), a.max(b)) };
+    let bnd: FxHashSet<(usize, usize)> = (0..nloop).map(|i| ek(i, (i + 1) % nloop)).collect();
+    for _pass in 0..12 {
+        if t.len() >= max_tris { break; }
+        let mut eorder: Vec<(usize, usize)> = vec![];
+        let mut em: FxHashMap<(usize, usize), Vec<usize>> = FxHashMap::default();
+        for (ti, tr) in t.iter().enumerate() {
+            for k in 0..3 {
+                let e = ek(tr[k], tr[(k + 1) % 3]);
+                let l = em.entry(e).or_default();
+                if l.is_empty() { eorder.push(e); }
+                l.push(ti);
+            }
+        }
+        let mut changed = false;
+        let mut used: FxHashSet<usize> = FxHashSet::default();
+        let mut drop: FxHashSet<usize> = FxHashSet::default();
+        let mut newt = t.clone();
+        let mut cand: Vec<(f64, usize, usize, UV, V3, Vec<usize>)> = vec![];
+        for e in &eorder {
+            let ts = &em[e];
+            if bnd.contains(e) || ts.len() != 2 { continue; }
+            let (i, j) = *e;
+            let m = [(v[i][0] + v[j][0]) / 2.0, (v[i][1] + v[j][1]) / 2.0];
+            let pm = ev.eval(m[0], m[1]);
+            let c = add(p[i], p[j]);
+            let d = norm(sub(pm, [c[0] / 2.0, c[1] / 2.0, c[2] / 2.0]));
+            if d > tol { cand.push((d, i, j, m, pm, ts.clone())); }
+        }
+        cand.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        for (_, i, j, m, pm, ts) in cand {
+            if newt.len() - drop.len() >= max_tris { break; }
+            if ts.iter().any(|x| used.contains(x)) { continue; }
+            v.push(m); p.push(pm); let mi = v.len() - 1;
+            for &tx in &ts {
+                let [mut a, mut b, mut c] = t[tx];
+                for _ in 0..3 { if (a == i && b == j) || (a == j && b == i) { break; } let o = a; a = b; b = c; c = o; }
+                newt.push([a, mi, c]); newt.push([mi, b, c]); drop.insert(tx); used.insert(tx);
+            }
+            changed = true;
+        }
+        for (ti, tr) in t.iter().enumerate() {
+            if drop.contains(&ti) || newt.len() - drop.len() >= max_tris { continue; }
+            if (0..3).all(|k| bnd.contains(&ek(tr[k], tr[(k + 1) % 3]))) {
+                let c = [(0.0 + v[tr[0]][0] + v[tr[1]][0] + v[tr[2]][0]) / 3.0, (0.0 + v[tr[0]][1] + v[tr[1]][1] + v[tr[2]][1]) / 3.0];
+                let pc = ev.eval(c[0], c[1]);
+                let s3 = add(add(p[tr[0]], p[tr[1]]), p[tr[2]]);
+                if norm(sub(pc, [s3[0] / 3.0, s3[1] / 3.0, s3[2] / 3.0])) > tol {
+                    v.push(c); p.push(pc); let ci = v.len() - 1;
+                    let [a, b, cc] = *tr;
+                    newt.push([a, b, ci]); newt.push([b, cc, ci]); newt.push([cc, a, ci]); drop.insert(ti); changed = true;
+                }
+            }
+        }
+        t = newt.into_iter().enumerate().filter(|(i, _)| !drop.contains(i)).map(|(_, x)| x).collect();
+        if !changed { break; }
+    }
+    (v, t)
 }

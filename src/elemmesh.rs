@@ -241,14 +241,14 @@ impl Ctx {
                 }
                 if !per.is_empty() {
                     // exact duplicate bodies (same corners) are one solid in Revit's geometry
-                    let mut seen: rustc_hash::FxHashSet<(usize, [u64; 3], [u64; 3], String)> = Default::default();
+                    let mut seen: rustc_hash::FxHashSet<(usize, [u64; 3], [u64; 3], String, String)> = Default::default();
                     per.retain(|p| {
                         let pts: Vec<V3> = p.0.iter().flat_map(|t| t.iter().copied()).collect();
                         let (mut mn, mut mx) = (pts[0], pts[0]);
                         for q in &pts { for k in 0..3 { mn[k] = mn[k].min(q[k]); mx[k] = mx[k].max(q[k]); } }
                         let r3 = |v: V3| [((v[0] * 1000.0).round_ties_even() / 1000.0 + 0.0).to_bits(), ((v[1] * 1000.0).round_ties_even() / 1000.0 + 0.0).to_bits(), ((v[2] * 1000.0).round_ties_even() / 1000.0 + 0.0).to_bits()];
                         let flat: Vec<f64> = pts.iter().flat_map(|q| [q[0].abs(), q[1].abs(), q[2].abs()]).collect();
-                        let sg = (p.0.len(), r3(mn), r3(mx), format!("{:.2}", np_sum(&flat)));
+                        let sg = (p.0.len(), r3(mn), r3(mx), format!("{:.2}", np_sum(&flat)), format!("{:?}", node_style(kk, geos[p.3 as usize])));
                         seen.insert(sg)
                     });
                     own = per.iter().flat_map(|p| p.0.iter().copied()).collect();
