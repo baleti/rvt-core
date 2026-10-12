@@ -141,5 +141,6 @@ fn rvt_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pack::pack, m)?)?;
     m.add_function(wrap_pyfunction!(pack::unpack, m)?)?;
     m.add_function(wrap_pyfunction!(params::ifc_stored, m)?)?;
+    m.add_function(wrap_pyfunction!(params::ifc_from_unique, m)?)?;
     Ok(())
 }

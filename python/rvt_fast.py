@@ -389,11 +389,60 @@ def resolve(src, rid, via, path):
     if is_fast_src(src): return src.resolve(rid, via, path)
     import rvt_map2 as M; return M.resolve(src, rid, via, path)
 
+def _params_impl(path, x):
+    """rvt_params.params(path) with x = the extraction: the reference loop line by line, MAPPING loop / resolve / IfcGUID in Rust (tests/diff_params.py)"""
+    import rvt_params as P, rvt_map2 as M, rvt_famparams as F, rvt_geom as Gm, rvt_uid, ifcguid, rvt_entities as E, rvt_decode as D, rvt_scan as S
+    RC = _rc()
+    recs = {}
+    for (eid, c), r in x['recs'].items(): recs.setdefault(eid, r)
+    hdr = {eid: {'fields': f} for eid, f in x['eh'].items()}
+    src = RC.FlatSrc(recs, hdr, D.EID); src.set_mapping(P.MAPPING, P.PNAMES, sorted(M.SENT)); cap = F.captions(x['recs'])
+    lv = {}
+    for (eid, c), r in x['recs'].items():
+        if c == 'Level':
+            o = E.S_(r['fields'], 'm_pSurface', 'm_origin')
+            if o: lv[eid] = o[2]
+    uid = rvt_uid.unique_ids(path)
+    st = RC.ifc_stored({e: [r] for e, r in recs.items()})
+    own = S.owners(path); out = {}
+    UNIV = not os.environ.get('RVT_NOUNIV')
+    fu = RC.ifc_from_unique
+    def _sg(v):
+        v = int(v); return v - (1 << 64) if v >= 1 << 63 else (v - (1 << 32) if 1 << 31 <= v < 1 << 32 else v)
+    for eid, r in recs.items():
+        c = r['class']; f = r['fields']; d = src.apply(eid, c)
+        sid = F.S_(f, 'm_pInstanceInfo', 'm_symbolId'); sym = recs.get(int(sid), {}).get('fields') if sid is not None else None
+        for k, (v0, vi, vs, ve) in F.named_values(f, cap, sym).items():
+            if isinstance(v0, (int, float)): d.setdefault(k, float(v0))
+        if c in ('RbsPipeCurve', 'RbsDuctCurve', 'RbsConduitCurve', 'CableTray'): d.update(Gm.mep_curve(f, c, lv))
+        elif c == 'FamilyInstance': d.update(Gm.fam_instance(f, lv))
+        elif c == 'SWall' or c.endswith('CenterLine'):
+            cu = Gm.primary_curve(f)
+            if cu is not None and Gm.curve_length(cu) is not None: d['Length'] = Gm.curve_length(cu)
+        hf = x['eh'].get(eid) or {}
+        if UNIV: cid = hf.get('m_categroryId'); d['Category|ElementId'] = _sg(cid) if cid is not None else -1
+        dop = hf.get('m_designOptionId', f.get('m_designOptionId')); dop = _sg(dop) if dop is not None else -1
+        if UNIV: d['Design Option|ElementId'] = dop
+        if UNIV: d['Design Option|String'] = 'Main Model' if dop == -1 else (recs.get(dop, {}).get('fields', {}).get('m_name') or 'Main Model')
+        if eid in uid:
+            d['UniqueId'] = uid[eid]; d['IfcGUID'] = st.get(eid) or fu(uid[eid])
+            o = own.get(eid)
+            if not st.get(eid) and c.endswith('CenterLine') and o is not None and o in uid: d['IfcGUID'] = st.get(o) or fu(uid[o])
+        out[eid] = {'class': c, 'params': d}
+    return out
+
 _PLOCK = __import__('threading').Lock()
 def params(path, x=None):
     """== rvt_params.params(path): the reference code, with its three hot kernels (Src/resolve/rvt_ifc.stored) running in Rust"""
     import rvt_params as P, rvt_map2 as M, rvt_ifc
     if not on(): return P.params(path)
+    if not os.environ.get('RVT_CORE_PARAMS_PATCH'):
+        import gc
+        if x is None: x = extract(path, want_all=True)
+        gc_was = gc.isenabled(); gc.disable()
+        try: return _params_impl(path, x)
+        finally:
+            if gc_was: gc.enable()
     with _PLOCK:
         import rvt_xcache
         if x is None and on():
