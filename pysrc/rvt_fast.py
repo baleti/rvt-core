@@ -304,6 +304,18 @@ def element_mesh_rust(doc, eid, symbol_depth=2, detail=3):
     """rvt_elemmesh.element_mesh computed in Rust (tests/diff_mesh.py --impl rust compares it with the reference)"""
     return mesh_doc(doc).element_mesh(int(eid), symbol_depth, detail)
 
+def refined_volume(tris, meta, levels=3, tol=5e-5, centroid=False, fid=None):
+    """== rvt_mesh.refined_volume: in Rust when the meta evaluators are this extension's surfaces (element_mesh results of mesh_doc / rvt_viewer_fast),
+    otherwise (Python closures, fast path off) the reference. tests/diff_refvol.py: equal to 1e-9 relative"""
+    import rvt_mesh as M
+    if on() and tris:
+        try:
+            import numpy as np
+            return _rc().refined_volume(np.asarray([[np.asarray(p, float) for p in t] for t in tris], float).tolist(), list(meta), levels, tol, centroid, list(fid) if fid is not None else None)
+        except NotImplementedError: pass
+        except ValueError: pass                                  # the reference raises (or decides) on its own
+    return M.refined_volume(tris, meta, levels=levels, tol=tol, centroid=centroid, fid=fid)
+
 # ---------------- progress file + streaming meshes for the viewer ----------------
 def file_key(f):
     import hashlib

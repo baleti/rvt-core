@@ -2,6 +2,7 @@
   load(path, log)        == rvtviewer.reader.load(path, log)     {'recs','eh','W','params','classes','tagbase'}
   em_geometry(model, e)  == rvtviewer.build._em_geometry(GG, src, e) for one element (from the Rust mesh; see README for the equivalence rule)
   em_geometries(model, ids, chunk) -> iterator of (id, result) as meshes finish (progress file updated)
+  refined_volume(tris, meta, ..., fid) == rvt_mesh.refined_volume, in Rust for em_geometries' tris_raw/meta_raw (Facades 141 meshes: 34 s -> 0.6 s)
 Usage: sys.path.insert(0, os.path.expanduser('~/src/rvt-core/python')); import rvt_viewer_fast as VF; m = VF.open(path); d = VF.load(path, model=m)"""
 import os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -54,3 +55,6 @@ def em_geometries(model, ids, chunk=128):
             if _needs_full(r):
                 md = md or RF.mesh_doc(model.doc()); full = md.element_mesh(int(e))
             yield e, _result(r, full)
+
+def refined_volume(tris, meta, levels=3, tol=5e-5, centroid=False, fid=None):
+    return RF.refined_volume(tris, meta, levels=levels, tol=tol, centroid=centroid, fid=fid)

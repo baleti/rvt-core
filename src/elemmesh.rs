@@ -559,6 +559,24 @@ impl MeshDoc {
         r.map_err(|_| PyKeyError::new_err("raised"))
     }
 
+    /// rvt_mesh.refined_volume(element_mesh(eid).tris, .meta, fid=.fid) for many elements in parallel -> list of (volume, closed, area) | None
+    /// (None: no triangles, or the reference would raise)
+    #[pyo3(signature = (ids, symbol_depth=2, detail=3, levels=3))]
+    fn refined_volumes(&self, py: Python<'_>, ids: Vec<u64>, symbol_depth: i32, detail: i64, levels: i32) -> PyResult<Vec<Option<(f64, bool, f64)>>> {
+        let ctx = self.ctx.clone();
+        let pp = self.py_.clone();
+        Ok(py.allow_threads(move || {
+            let ec = move |r: &[(&[UV], &[u32])]| earcut_py(&pp, r);
+            ids.par_iter().map(|&e| {
+                let m = ctx.element_mesh(e, symbol_depth, detail, &ec);
+                match &*m {
+                    Ok(m) if !m.tris.is_empty() && m.meta.len() == m.tris.len() => crate::refvol::refined_volume(&m.tris, &m.meta, levels, 5e-5, Some(&m.fid)).ok().map(|r| (r.0, r.1, r.2)),
+                    _ => None,
+                }
+            }).collect()
+        }))
+    }
+
     /// element meshes of many elements in parallel -> list of (eid, dict | None on error) in input order.
     /// compact=True: tris as one (n,3,3) array, 'surf' (kind per triangle) instead of 'meta'
     #[pyo3(signature = (ids, symbol_depth=2, detail=3, compact=false))]
@@ -575,4 +593,39 @@ impl MeshDoc {
         }
         Ok(out)
     }
+}
+
+/// rvt_mesh.refined_volume(tris, meta, levels, tol, centroid, fid) for meshes whose evaluators are this extension's SurfEval objects (element_mesh results);
+/// raises NotImplementedError when an evaluator is a Python callable (the caller then runs the reference), ValueError where the reference would raise
+#[pyfunction]
+#[pyo3(signature = (tris, meta, levels=3, tol=5e-5, centroid=false, fid=None))]
+pub fn refined_volume(py: Python<'_>, tris: Vec<[[f64; 3]; 3]>, meta: &Bound<'_, PyList>, levels: i32, tol: f64, centroid: bool, fid: Option<Vec<i64>>) -> PyResult<PyObject> {
+    const KINDS: [&str; 10] = ["plane", "cylinder", "cone", "revolution", "ruled", "hermite", "offset", "nurbs", "spline", "other"];
+    let mut ms: Vec<Meta> = Vec::with_capacity(meta.len());
+    for x in meta.iter() {
+        let t = x.downcast::<PyTuple>()?;
+        let kind: String = t.get_item(0)?.extract()?;
+        let kind: &'static str = KINDS.iter().copied().find(|k| *k == kind).unwrap_or_else(|| if kind == "plane" { "plane" } else { "other" });
+        let evo = t.get_item(1)?;
+        let ev = if evo.is_none() { MetaEv::None } else {
+            match evo.downcast::<SurfEval>() {
+                Ok(se) => match &se.borrow().s { Some(s) => MetaEv::S(s.clone()), None => MetaEv::Broken },
+                Err(_) => return Err(pyo3::exceptions::PyNotImplementedError::new_err("evaluator is not a rvt_core surface")),
+            }
+        };
+        let uvo = t.get_item(2)?;
+        let uv = if uvo.is_none() { None } else {
+            let l: Vec<(f64, f64)> = uvo.extract()?;
+            if l.len() != 3 { return Err(pyo3::exceptions::PyValueError::new_err("uv")); }
+            Some([[l[0].0, l[0].1], [l[1].0, l[1].1], [l[2].0, l[2].1]])
+        };
+        ms.push(Meta { kind, ev, uv });
+    }
+    if ms.len() != tris.len() { return Err(pyo3::exceptions::PyValueError::new_err("meta length")); }
+    let r = py.allow_threads(|| crate::refvol::refined_volume(&tris, &ms, levels, tol, fid.as_deref()));
+    let (v, c, a, cen) = r.map_err(|_| pyo3::exceptions::PyValueError::new_err("evaluator raised in the reference path"))?;
+    if centroid {
+        let np = py.import_bound("numpy")?;
+        Ok((v, c, a, np.getattr("array")?.call1((cen.to_vec(),))?).into_py(py))
+    } else { Ok((v, c, a).into_py(py)) }
 }

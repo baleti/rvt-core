@@ -8,6 +8,7 @@ mod g103;
 mod es;
 mod mesh;
 mod elemmesh;
+mod refvol;
 mod params;
 mod cache;
 mod pack;
@@ -144,6 +145,7 @@ fn rvt_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     init_pool();
     m.add_function(wrap_pyfunction!(strip_pages, m)?)?;
     m.add_function(wrap_pyfunction!(select_closed_shell_dbg, m)?)?;
+    m.add_function(wrap_pyfunction!(elemmesh::refined_volume, m)?)?;
     m.add_function(wrap_pyfunction!(joined, m)?)?;
     m.add_function(wrap_pyfunction!(header_candidates, m)?)?;
     m.add_class::<decoder::RecDecoder>()?;
