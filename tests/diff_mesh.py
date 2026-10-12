@@ -16,7 +16,7 @@ def mdigest(m):
     meta = []
     for x in m.get('meta') or []:
         k, ev, uv = x
-        ent = [k, repr(uv)]
+        ent = [k, repr(tuple(tuple(float(c) for c in q) for q in uv) if uv is not None else None)]     # uv values exact; the container type (list from a decoded record / tuple when computed) is not compared
         if ev is not None and uv is not None:
             try: ent.append([np.asarray(ev(float(u), float(v)), float).tobytes().hex() for u, v in uv])
             except Exception as e: ent.append('EXC')
