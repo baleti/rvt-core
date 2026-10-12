@@ -4,7 +4,7 @@ use crate::dec::{parse_pair, Class, DErr, Dec, EsField, Field, Schema};
 use crate::extract::{self, IdSet, Params, TagKind};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
+use pyo3::types::{PyBytes, PyDict, PyList, PyString, PyTuple};
 use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 use std::sync::Arc;
@@ -20,6 +20,9 @@ pub struct RecDecoder {
     pub g103: rustc_hash::FxHashMap<(String, usize), Arc<Vec<u8>>>,
     /// element id -> (group buffer, offset) of its channel-103 record (last definition wins, like build_index's dict)
     pub g103_idx: rustc_hash::FxHashMap<u64, (Arc<Vec<u8>>, usize)>,
+    /// binary-cache sink: serialised partition blocks of extract_* calls while active
+    sink: Option<Vec<u8>>,
+    writer: Option<std::thread::JoinHandle<std::io::Result<()>>>,
 }
 
 pub fn classes_from_py(classes: &Bound<'_, PyList>) -> PyResult<Vec<Class>> {
@@ -85,7 +88,7 @@ impl RecDecoder {
     fn new(py: Python<'_>, classes: &Bound<'_, PyList>, idsize: usize, stop: Vec<String>, strcap: usize, eid_type: Py<PyAny>, desync_type: Py<PyAny>) -> PyResult<Self> {
         let s = Schema::new(classes_from_py(classes)?, idsize, &stop, strcap);
         let conv = Conv::new(py, &s, eid_type);
-        Ok(RecDecoder { schema: Arc::new(s), conv, desync_type, strcap, ids: None, g103: Default::default(), g103_idx: Default::default() })
+        Ok(RecDecoder { schema: Arc::new(s), conv, desync_type, strcap, ids: None, g103: Default::default(), g103_idx: Default::default(), sink: None, writer: None })
     }
 
     /// es_schemas: {guid_hex: {'m_fields': [{'m_entryIndex','m_containerType','m_fieldTypeName','m_fieldName'}]}}
@@ -180,6 +183,86 @@ impl RecDecoder {
         crate::elemmesh::MeshDoc::new(py, ctx, conv)
     }
 
+    /// start collecting extraction results for the binary cache
+    fn cache_begin(&mut self) { self.sink = Some(Vec::new()); }
+
+    /// write the collected blocks: header = JSON text (the caller's versions + hashes); the schema key table is appended to it
+    fn cache_write(&mut self, path: &str, header: &str) -> PyResult<()> {
+        let blocks = self.sink.take().ok_or_else(|| PyValueError::new_err("cache_begin first"))?;
+        let keys = serde_json::to_string(&self.schema.keys).unwrap();
+        let hdr = format!("{{\"user\":{},\"keys\":{}}}", header, keys);
+        let tmp = format!("{}.{}.tmp", path, std::process::id());
+        let path = path.to_string();
+        // written by a background thread: the caller does not wait for the disk (a process that exits first leaves only the .tmp)
+        let h = std::thread::spawn(move || -> std::io::Result<()> {
+            use std::io::Write;
+            {
+                let mut f = std::io::BufWriter::new(std::fs::File::create(&tmp)?);
+                f.write_all(b"RVTC")?;
+                f.write_all(&crate::cache::FORMAT.to_le_bytes())?;
+                f.write_all(&(hdr.len() as u32).to_le_bytes())?;
+                f.write_all(hdr.as_bytes())?;
+                f.write_all(&blocks)?;
+                f.flush()?;
+            }
+            std::fs::rename(&tmp, &path)
+        });
+        self.writer = Some(h);
+        Ok(())
+    }
+
+    /// wait for a pending background cache write (tests)
+    fn cache_flush(&mut self, py: Python<'_>) -> PyResult<()> {
+        if let Some(h) = self.writer.take() { py.allow_threads(|| h.join()).map_err(|_| PyValueError::new_err("cache writer panicked"))??; }
+        Ok(())
+    }
+
+    /// header JSON of a cache file (None when it is not a cache file of this format)
+    #[staticmethod]
+    fn cache_header(path: &str) -> PyResult<Option<String>> {
+        use std::io::Read;
+        let mut f = match std::fs::File::open(path) { Ok(f) => f, Err(_) => return Ok(None) };
+        let mut h = [0u8; 12];
+        if f.read_exact(&mut h).is_err() || &h[0..4] != b"RVTC" || u32::from_le_bytes(h[4..8].try_into().unwrap()) != crate::cache::FORMAT { return Ok(None); }
+        let n = u32::from_le_bytes(h[8..12].try_into().unwrap()) as usize;
+        let mut b = vec![0u8; n];
+        if f.read_exact(&mut b).is_err() { return Ok(None); }
+        Ok(String::from_utf8(b).ok())
+    }
+
+    /// load a cache file written with this schema -> (recs, eh) dicts, merged first-wins in partition order; None if the key table differs
+    fn cache_load<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Option<(Bound<'py, PyDict>, Bound<'py, PyDict>)>> {
+        let f = std::fs::File::open(path)?;
+        let mm = unsafe { memmap2::Mmap::map(&f)? };
+        let b: &[u8] = &mm;
+        if b.len() < 12 || &b[0..4] != b"RVTC" { return Ok(None); }
+        let n = u32::from_le_bytes(b[8..12].try_into().unwrap()) as usize;
+        let hdr: serde_json::Value = match serde_json::from_slice(&b[12..12 + n]) { Ok(v) => v, Err(_) => return Ok(None) };
+        let keys: Vec<String> = match serde_json::from_value(hdr["keys"].clone()) { Ok(k) => k, Err(_) => return Ok(None) };
+        let kt: Vec<Py<PyString>> = keys.iter().map(|k| PyString::intern_bound(py, k).unbind()).collect();
+        let geo = PyString::new_bound(py, "<geometry not decoded>");
+        let mut rd = crate::cache::Rd { b, p: 12 + n };
+        let recs = PyDict::new_bound(py);
+        let eh = PyDict::new_bound(py);
+        while rd.p < b.len() {
+            let nr = rd.u32()? as usize;
+            for _ in 0..nr {
+                let eid = rd.u64()?;
+                let ct = rd.u32()?;
+                let key = PyTuple::new_bound(py, [eid.into_py(py), self.conv.cname(py, ct)]);
+                let r = rd.rec(py, &self.conv, &kt, &geo)?;
+                if !recs.contains(&key)? { recs.set_item(key, r)?; }
+            }
+            let ne = rd.u32()? as usize;
+            for _ in 0..ne {
+                let eid = rd.u64()?;
+                let v = rd.val(py, &self.conv, &kt, &geo)?;
+                if !eh.contains(eid)? { eh.set_item(eid, v)?; }
+            }
+        }
+        Ok(Some((recs, eh)))
+    }
+
     /// ElemTable ids (sorted) used by extract_chunk
     fn set_ids(&mut self, ids: Vec<u64>) {
         let set = IdSet::new(&ids);
@@ -199,20 +282,20 @@ impl RecDecoder {
     /// wanted: class tags to keep as records; eh_tag: ElementHeader tag; slim: tags whose records are reduced to {'id','class','fields':{},'complete'}
     /// -> ([((eid, class), rec)], [(eid, header fields)]) in first-wins order
     #[pyo3(signature = (chunk, wanted, eh_tag, only_ids=None, slim=None))]
-    fn extract_chunk<'py>(&self, py: Python<'py>, chunk: &[u8], wanted: Vec<u32>, eh_tag: i64, only_ids: Option<Vec<u64>>, slim: Option<Vec<u32>>) -> PyResult<Bound<'py, PyTuple>> {
+    fn extract_chunk<'py>(&mut self, py: Python<'py>, chunk: &[u8], wanted: Vec<u32>, eh_tag: i64, only_ids: Option<Vec<u64>>, slim: Option<Vec<u32>>) -> PyResult<Bound<'py, PyTuple>> {
         self.extract_impl(py, chunk, wanted, eh_tag, only_ids, slim)
     }
 
     /// extract_chunk on a raw (stored) partition stream: pages stripped and members inflated here. None when the member layout is unexpected (caller falls back).
     #[pyo3(signature = (stored, wanted, eh_tag, only_ids=None, slim=None))]
-    fn extract_stored<'py>(&self, py: Python<'py>, stored: &[u8], wanted: Vec<u32>, eh_tag: i64, only_ids: Option<Vec<u64>>, slim: Option<Vec<u32>>) -> PyResult<Option<Bound<'py, PyTuple>>> {
+    fn extract_stored<'py>(&mut self, py: Python<'py>, stored: &[u8], wanted: Vec<u32>, eh_tag: i64, only_ids: Option<Vec<u64>>, slim: Option<Vec<u32>>) -> PyResult<Option<Bound<'py, PyTuple>>> {
         let chunk = match py.allow_threads(|| crate::joined_vec(stored)) { Some(c) => c, None => return Ok(None) };
         Ok(Some(self.extract_impl(py, &chunk, wanted, eh_tag, only_ids, slim)?))
     }
 }
 
 impl RecDecoder {
-    fn extract_impl<'py>(&self, py: Python<'py>, chunk: &[u8], wanted: Vec<u32>, eh_tag: i64, only_ids: Option<Vec<u64>>, slim: Option<Vec<u32>>) -> PyResult<Bound<'py, PyTuple>> {
+    fn extract_impl<'py>(&mut self, py: Python<'py>, chunk: &[u8], wanted: Vec<u32>, eh_tag: i64, only_ids: Option<Vec<u64>>, slim: Option<Vec<u32>>) -> PyResult<Bound<'py, PyTuple>> {
         let s = self.schema.clone();
         let (_, ids) = self.ids.as_ref().ok_or_else(|| PyValueError::new_err("set_ids first"))?;
         let mut kinds = vec![TagKind::Other; 65536];
@@ -227,14 +310,34 @@ impl RecDecoder {
         let p = Params { w, kinds: &kinds, canon: &canon, full: &full, only: only.as_ref() };
         let tm = std::env::var("RVT_CORE_TIMING").is_ok();
         let t0 = std::time::Instant::now();
-        let (recs, ehs) = py.allow_threads(|| {
+        let want_block = self.sink.is_some();
+        let (recs, ehs, block) = py.allow_threads(|| {
             let cands = extract::candidates_tagged(chunk, ids, w, &mask);
             let t1 = t0.elapsed();
             let dec = extract::decode_all(&s, chunk, &cands, &p);
             let t2 = t0.elapsed();
-            let r = extract::merge(&s, chunk, &cands, dec, &p);
+            let (recs, ehs) = extract::merge(&s, chunk, &cands, dec, &p);
             if tm { eprintln!("rvt_core extract: {} bytes, {} candidates: scan {:?} decode {:?} merge {:?}", chunk.len(), cands.len(), t1, t2 - t1, t0.elapsed() - t2); }
-            r
+            // binary-cache block, serialised in parallel
+            let block = if want_block {
+                let mut b: Vec<u8> = Vec::new();
+                b.extend_from_slice(&(recs.len() as u32).to_le_bytes());
+                let parts: Vec<Vec<u8>> = recs.par_chunks(256).map(|ch| {
+                    let mut o = vec![];
+                    for ((eid, ct), r) in ch { o.extend_from_slice(&eid.to_le_bytes()); o.extend_from_slice(&ct.to_le_bytes()); crate::cache::put_rec(&mut o, r, !p.full[r.tag as usize]); }
+                    o
+                }).collect();
+                for x in parts { b.extend_from_slice(&x); }
+                b.extend_from_slice(&(ehs.len() as u32).to_le_bytes());
+                let parts: Vec<Vec<u8>> = ehs.par_chunks(256).map(|ch| {
+                    let mut o = vec![];
+                    for (eid, r) in ch { o.extend_from_slice(&eid.to_le_bytes()); crate::cache::put_val(&mut o, &r.fields, &r.slots); }
+                    o
+                }).collect();
+                for x in parts { b.extend_from_slice(&x); }
+                Some(b)
+            } else { None };
+            (recs, ehs, block)
         });
         let t3 = t0.elapsed();
         let lr = PyList::empty_bound(py);
@@ -248,6 +351,7 @@ impl RecDecoder {
             le.append(PyTuple::new_bound(py, [eid.into_py(py), self.conv.val(py, &r.fields, &r.slots)?]))?;
         }
         if tm { eprintln!("rvt_core extract: to python {:?}", t0.elapsed() - t3); }
+        if let (Some(sk), Some(b)) = (self.sink.as_mut(), block) { sk.extend_from_slice(&b); }
         Ok(PyTuple::new_bound(py, [lr.into_py(py), le.into_py(py)]))
     }
 }

@@ -82,27 +82,68 @@ def extract(path, extra=(), only_ids=None, want_all=False, slim=None):
     if extra or want_all: wanted = {t for t, n in names.items() if t in et and (want_all or n in extra)}
     try: es = es_load(path)[0]
     except Exception: es = {}
-    rd = make_recdecoder(sch, W, es); rd.set_ids(sorted(ids))
     slim_tags = sorted(t for t in wanted if slim is not None and not slim(names[t])) if slim is not None else None
     oid = sorted(only_ids) if only_ids is not None else None
     wl = sorted(wanted)
+    import gc, json, hashlib
+    cfn = hdr = None
+    if only_ids is None and not os.environ.get('RVT_NOCACHE') and not os.environ.get('RVT_CORE_NOCACHE'):
+        hdr = json.dumps({'reader': reader_version(), 'schema': hashlib.sha1(o.openstream('Formats/Latest').read()).hexdigest(), 'file': file_key(path), 'W': W})
+        cfn = os.path.join(CACHE, '%s-x%s.rvtc' % (file_key(path), hashlib.sha1(repr((wl, EH, slim_tags)).encode()).hexdigest()[:10]))
+        h = _rc().RecDecoder.cache_header(cfn)
+        if h is not None:
+            try: user = json.loads(h)['user']
+            except Exception: user = None
+            if user == json.loads(hdr):
+                rd = make_recdecoder(sch, W)
+                gc_was = gc.isenabled(); gc.disable()
+                try: got = rd.cache_load(cfn)
+                except Exception: got = None
+                finally:
+                    if gc_was: gc.enable()
+                if got is not None: return dict(eh=got[1], recs=got[0], W=W, sch=sch)
+    try: es = es_load(path)[0]
+    except Exception: es = {}
+    rd = make_recdecoder(sch, W, es); rd.set_ids(sorted(ids))
+    if cfn: rd.cache_begin()
     recs = {}; eh = {}
-    import gc
     gc_was = gc.isenabled(); gc.disable()                   # millions of new container objects: cyclic GC passes would cost more than the decoding
     try:
-        _partitions(o, rd, wl, EH, oid, slim_tags, recs, eh, T)
+        ok = _partitions(o, rd, wl, EH, oid, slim_tags, recs, eh, T)
     finally:
         if gc_was: gc.enable()
+    if cfn and ok:
+        try: os.makedirs(CACHE, exist_ok=True); rd.cache_write(cfn, hdr)
+        except Exception: pass
     return dict(eh=eh, recs=recs, W=W, sch=sch)
 
-def _partitions(o, rd, wl, EH, oid, slim_tags, recs, eh, T):
-    for pn in sorted(x for x in ['/'.join(e) for e in o.listdir(streams=True)] if x.startswith('Partitions/')):
-        raw = o.openstream(pn).read()
+_RV = {}
+def reader_version():
+    """content hash of the reference modules whose semantics the fast paths reproduce + the extension build (cache version key)"""
+    import hashlib
+    fs = ['rvt_decode.py', 'rvt_entities.py', 'rvt_scan.py', 'rvt_es.py', 'fmt_parser.py', 'rvtfmt.py', 'rvt2text.py', 'rvt_inventory.py']
+    st = tuple((f, os.stat(os.path.join(READER, f)).st_mtime_ns) for f in fs if os.path.exists(os.path.join(READER, f)))
+    so = os.path.join(HERE, 'rvt_core.abi3.so'); sst = os.stat(so) if os.path.exists(so) else None
+    k = (st, sst and (sst.st_size, sst.st_mtime_ns))
+    if k not in _RV:
+        h = hashlib.sha1()
+        for f, _ in st: h.update(open(os.path.join(READER, f), 'rb').read())
+        if sst: h.update(open(so, 'rb').read())
+        _RV.clear(); _RV[k] = h.hexdigest()[:16]
+    return _RV[k]
+
+def _partitions(o, rd, wl, EH, oid, slim_tags, recs, eh, T, progress=None):
+    pns = sorted(x for x in ['/'.join(e) for e in o.listdir(streams=True)] if x.startswith('Partitions/'))
+    nb = 0
+    for i, pn in enumerate(pns):
+        raw = o.openstream(pn).read(); nb += len(raw)
         res = rd.extract_stored(raw, wl, EH, oid, slim_tags)
         if res is None: res = rd.extract_chunk(T.joined(raw), wl, EH, oid, slim_tags)
         del raw
         for k, r in res[0]: recs.setdefault(k, r)
         for k, v in res[1]: eh.setdefault(k, v)
+        if progress: progress.set(done=i + 1, total=len(pns), bytes_read=nb, elements_decoded=len(recs))
+    return True
 
 # ---------------- channel-103 saved graphics (g103_get) ----------------
 class G103:
@@ -301,3 +342,42 @@ def _auto_workers():
         if lim != 'max': n = max(1, min(n, int((int(lim) / 2**30 - 1.5) / 0.6)))
     except Exception: pass
     return int(os.environ.get('RVT_WORKERS', n))
+
+# ---------------- parameter layer (rvt_params / rvt_map2 / rvt_ifc) ----------------
+def ifc_stored(recs):
+    """== rvt_ifc.stored(recs)"""
+    if not on():
+        import rvt_ifc; return rvt_ifc.stored(recs)
+    return _rc().ifc_stored(recs)
+
+def Src(last, hdr=None):
+    """== rvt_map2.Src(last, hdr) (flat / resolve in Rust)"""
+    import rvt_decode as D, rvt_map2 as M
+    if not on(): return M.Src(last, hdr)
+    return _rc().FlatSrc(last, hdr or {}, D.EID)
+
+def is_fast_src(src):
+    RC = _rc(); return RC is not None and isinstance(src, RC.FlatSrc)
+
+def resolve(src, rid, via, path):
+    """== rvt_map2.resolve(src, rid, via, path)"""
+    if is_fast_src(src): return src.resolve(rid, via, path)
+    import rvt_map2 as M; return M.resolve(src, rid, via, path)
+
+_PLOCK = __import__('threading').Lock()
+def params(path):
+    """== rvt_params.params(path): the reference code, with its three hot kernels (Src/resolve/rvt_ifc.stored) running in Rust"""
+    import rvt_params as P, rvt_map2 as M, rvt_ifc
+    if not on(): return P.params(path)
+    with _PLOCK:
+        saved = (M.Src, M.resolve, rvt_ifc.stored)
+        FS = _rc().FlatSrc; orig = M.resolve
+        def resolve_bound(src, rid, via, path, FS=FS, orig=orig):
+            return src.resolve(rid, via, path) if type(src) is FS else orig(src, rid, via, path)
+        M.Src, M.resolve, rvt_ifc.stored = Src, resolve_bound, _rc().ifc_stored
+        import gc
+        gc_was = gc.isenabled(); gc.disable()
+        try: return P.params(path)
+        finally:
+            M.Src, M.resolve, rvt_ifc.stored = saved
+            if gc_was: gc.enable()
