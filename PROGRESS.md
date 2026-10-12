@@ -16,3 +16,12 @@ Done (all differential-tested vs the pure-Python oracle):
 - ~/rvt-research/RUST_INTEGRATION.md written (hooks for 176, notes for 187); extension deployed there (backup rvt_core.abi3.so.stage2-backup).
 
 Next: element_mesh in Rust, params, binary cache, README timings.
+
+## 2026-10-12 afternoon
+- element_mesh ported to Rust (mesh.rs, elemmesh.rs): 2024 Structural 2,705 placed elements in 2.0 s (6 threads) vs ~125 s Python; diff_mesh: bit-identical except the
+  `_cycles_from_polylines` set-order cases (geometrically equivalent per face). Earcut = the same mapbox_earcut, batched per Geometry node (one GIL acquisition).
+- Session 176 applied the hooks (rvt_entities, g103_get, rvt_es, rvt_geometry) at ~13:15; their 13:08/13:13 mesh changes ported the same hour.
+- params kernels (FlatSrc/resolve/ifc_stored) identical, 4.8 -> 2.3 s on 40 MB.
+- binary cache (.rvtc extraction, .pk packed params/meshes/table), two-stage extraction (quick table + full model from one decode), Model / MeshStream / Progress.
+- dev/ vs released python/ (release.sh with smoke diffs) because 176's processes import python/ live.
+- Corpus suites running (tests/run_all.sh, then tests/run_more.sh): extract want_all identical on every file finished so far.

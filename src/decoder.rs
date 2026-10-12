@@ -334,6 +334,7 @@ impl RecDecoder {
         let w = s.idsize;
         let p = Params { w, kinds: &kinds, canon: &canon, full: &full_dec, only: only.as_ref() };
         let tm = std::env::var("RVT_CORE_TIMING").is_ok();
+        extract::SLOW.store(std::env::var("RVT_CORE_SLOW").is_ok(), std::sync::atomic::Ordering::Relaxed);
         let t0 = std::time::Instant::now();
         let want_block = self.sink.is_some();
         let (recs, ehs, block) = py.allow_threads(|| {

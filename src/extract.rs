@@ -94,6 +94,8 @@ pub enum Out {
     Skip,
 }
 
+pub static SLOW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 pub struct Cand {
     pub eid: u64,
     pub tags: [u32; 2],
@@ -113,7 +115,10 @@ pub fn decode_variant(dec: &mut Dec, chunk: &[u8], i: usize, short: bool, tag: u
     let kind = p.kinds.get(tag as usize).copied().unwrap_or(TagKind::Other);
     if kind == TagKind::Other { return Out::Skip; }
     dec.quiet = true;
-    let r = match dec.record(chunk, i, short) {
+    dec.abort_mid = if kind == TagKind::Wanted { Some(eid) } else { None };
+    let r = dec.record(chunk, i, short);
+    dec.abort_mid = None;
+    let r = match r {
         Ok((r, _)) => r,
         Err(_) => return Out::Reject,
     };
@@ -124,6 +129,7 @@ pub fn decode_variant(dec: &mut Dec, chunk: &[u8], i: usize, short: bool, tag: u
                 if r.error.is_some() && p.full[tag as usize] {
                     // the record keeps its error message: decode again with messages
                     dec.quiet = false;
+                    dec.abort_mid = None;
                     if let Ok((r2, _)) = dec.record(chunk, i, short) { r = r2; }
                     dec.quiet = true;
                 }
@@ -149,7 +155,7 @@ pub fn decode_variant(dec: &mut Dec, chunk: &[u8], i: usize, short: bool, tag: u
 pub fn decode_all(s: &Schema, chunk: &[u8], cands: &[usize], p: &Params) -> Vec<Cand> {
     let w = p.w;
     cands
-        .par_chunks(256)
+        .par_chunks(8)
         .map_init(
             || Dec::new(s),
             |dec, cs| {
@@ -164,8 +170,13 @@ pub fn decode_all(s: &Schema, chunk: &[u8], cands: &[usize], p: &Params) -> Vec<
                             continue;
                         }
                     }
+                    let t0 = if SLOW.load(std::sync::atomic::Ordering::Relaxed) { Some(std::time::Instant::now()) } else { None };
                     let r0 = decode_variant(dec, chunk, i, false, tl, eid, p);
                     let r1 = if matches!(r0, Out::Accept(_)) { None } else { Some(decode_variant(dec, chunk, i, true, ts, eid, p)) };
+                    if let Some(t0) = t0 {
+                        let dt = t0.elapsed();
+                        if dt.as_micros() > 2000 { eprintln!("rvt_core slow candidate at {} eid {} tags {} {} {:?} accepted {} {}", i, eid, dec.s.cname(tl), dec.s.cname(ts), dt, matches!(r0, Out::Accept(_)), matches!(r1, Some(Out::Accept(_)))); }
+                    }
                     out.push(Cand { eid, tags: [tl, ts], res: [Some(r0), r1] });
                 }
                 out

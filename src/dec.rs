@@ -266,6 +266,8 @@ pub struct Dec<'s> {
     /// skip building desync messages (callers that discard them; extract re-decodes accepted records with messages)
     pub quiet: bool,
     pub lazy_str: bool,
+    /// extraction: stop decoding a record as soon as its top-level m_id is decoded and differs (the record would be rejected anyway)
+    pub abort_mid: Option<u64>,
 }
 
 impl<'s> Dec<'s> {
@@ -273,7 +275,7 @@ impl<'s> Dec<'s> {
         let mut defined = FxHashSet::default();
         defined.insert(1);
         defined.insert(2);
-        Dec { s, defined, visited: vec![], err: None, path: vec![], slots: vec![], strcap: s.strcap, quiet: false, lazy_str: false }
+        Dec { s, defined, visited: vec![], err: None, path: vec![], slots: vec![], strcap: s.strcap, quiet: false, lazy_str: false, abort_mid: None }
     }
 
     fn path_str(&self) -> String {
@@ -529,7 +531,16 @@ impl<'s> Dec<'s> {
                     r
                 };
                 match r {
-                    Ok((v, np)) => { dict_set(out, f.key, v, dup); p = np; }
+                    Ok((v, np)) => {
+                        if is_top && !dup {
+                            if let Some(want) = self.abort_mid {
+                                if Some(f.key) == s.key_of.get("m_id").copied() && v.as_int() != Some(want as i128) && !matches!(v, Val::F(_)) {
+                                    return Err(DErr::Other("m_id mismatch".into()));
+                                }
+                            }
+                        }
+                        dict_set(out, f.key, v, dup); p = np;
+                    }
                     Err(DErr::Desync(m)) => {
                         if !self.quiet && !m.contains("@@") {
                             let tail = hex_sp(slice(b, p, p + 24));
