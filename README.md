@@ -20,6 +20,7 @@ Switch: `RVT_NOFAST=1` = everything runs the oracle. `RVT_NOCACHE=1` / `RVT_CORE
 Hooks in the oracle and the viewer API: `~/rvt-research/RUST_INTEGRATION.md`.
 
 ## Build, test, release
+* Long corpus runs go to remote-host: `h1run run NAME --env rvt --dir ~/src/rvt-core -- tests/h1_suite.sh SUITE...` (logs/h1_*.log, pulled back with `h1run pull src/rvt-core/logs`).
 * `./build.sh` (cargo -j4 under a 6 GB scope) -> `dev/`. `python/` is the released copy imported by session 176's hooks; only `./release.sh` (smoke differential tests first) writes it.
 * Differential tests (oracle = pure Python): `tests/diff_decoder.py`, `diff_extract.py` (`--want-all|--default|--slim`), `diff_g103.py`, `diff_es.py`, `diff_params.py`,
   `diff_mesh.py --impl rust`; corpus runs: `tests/run_all.sh`, `tests/run_more.sh`; oracle edits since the last port: `tests/oracle_watch.sh`.
@@ -48,12 +49,12 @@ Per component, same machine (measured during development, single runs):
 | extract(want_all), 28 MB Structural (pure Python, 1 worker) | 151 s | 2.8 s |
 | channel-103 index, 28 MB Structural | 15.7 s | 1.0 s |
 | extensible-storage schema scan, all 78 corpus files | 306 s | 8.2 s |
-| params, 40 MB Electrical | 4.8 s | 2.3 s |
+| params, 40 MB Electrical | 4.8 s | 1.0 s |
 | element meshes, 2,705 placed elements, 28 MB Structural | 291 s pure Python (est.), ~125 s Python mesh code on the fast Doc | 2.0 s (Rust, 6 threads) |
 | extraction reload, 40 MB (pickle of the same object: 1.0 s) | - | 1.0 s (.rvtc, mmap) |
 
 ## Against the targets
 * 40 MB (Electrical): element table + levels/grids + bboxes 1.6 s (target 2 s: met); usable model incl. params 6.1 s (target 8 s: met); first meshes 3.5 s, all 4,435 by 9.4 s, streamed.
-* 6 MB: table 0.8 s, all meshes 3.6 s; the full model (with params) needs 3.5 s: the 2 s target is met for the table, not for params (the remaining cost is
-  rvt_params' own Python loop, about 1.5 s: next candidate for a port).
+* 6 MB: table 0.7-0.8 s, all meshes 3.0 s; the full model (with params) 2.3 s since the params port (was 3.5 s), with the meshes computing alongside: the table meets 2 s, the full model is just above.
+* params since the port of its mapping loop: 6 MB 2.3 -> 0.65 s, 40 MB 4.8 -> 1.0 s (40 MB first open: full model 4.6 s).
 * Cached: table 0.07-0.10 s and meshes 0.1-0.3 s (met); the full model reload is 0.8-1.7 s, dominated by building ~10M Python objects (pickle is no faster).
