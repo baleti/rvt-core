@@ -18,6 +18,8 @@ pub struct RecDecoder {
     ids: Option<(Vec<u64>, IdSet)>,
     /// channel-103 group buffers (4 zero bytes + joined members) by (partition name, group index)
     pub g103: rustc_hash::FxHashMap<(String, usize), Arc<Vec<u8>>>,
+    /// element id -> (group buffer, offset) of its channel-103 record (last definition wins, like build_index's dict)
+    pub g103_idx: rustc_hash::FxHashMap<u64, (Arc<Vec<u8>>, usize)>,
 }
 
 pub fn classes_from_py(classes: &Bound<'_, PyList>) -> PyResult<Vec<Class>> {
@@ -83,7 +85,7 @@ impl RecDecoder {
     fn new(py: Python<'_>, classes: &Bound<'_, PyList>, idsize: usize, stop: Vec<String>, strcap: usize, eid_type: Py<PyAny>, desync_type: Py<PyAny>) -> PyResult<Self> {
         let s = Schema::new(classes_from_py(classes)?, idsize, &stop, strcap);
         let conv = Conv::new(py, &s, eid_type);
-        Ok(RecDecoder { schema: Arc::new(s), conv, desync_type, strcap, ids: None, g103: Default::default() })
+        Ok(RecDecoder { schema: Arc::new(s), conv, desync_type, strcap, ids: None, g103: Default::default(), g103_idx: Default::default() })
     }
 
     /// es_schemas: {guid_hex: {'m_fields': [{'m_entryIndex','m_containerType','m_fieldTypeName','m_fieldName'}]}}
@@ -140,7 +142,9 @@ impl RecDecoder {
                 out.append(t)?;
             }
         }
-        for (gi, b) in bufs { self.g103.insert((pn.clone(), gi), Arc::new(b)); }
+        let mut arcs: rustc_hash::FxHashMap<usize, Arc<Vec<u8>>> = Default::default();
+        for (gi, b) in bufs { let a = Arc::new(b); self.g103.insert((pn.clone(), gi), a.clone()); arcs.insert(gi, a); }
+        for (gi, es) in entries.iter() { for e in es { self.g103_idx.insert(e.rec.id, (arcs[gi].clone(), e.off)); } }
         Ok(out)
     }
 
@@ -163,6 +167,17 @@ impl RecDecoder {
         let out = PyDict::new_bound(py);
         for f in found { out.set_item(&f.guid, self.conv.val(py, &f.sc, &f.slots)?)?; }
         Ok(out)
+    }
+
+    /// element-mesh context over the loaded channel-103 records; census: class per element id (rvt_elemmesh.Doc.cls), ws: WallSweep type per id
+    fn mesh_doc(&self, py: Python<'_>, cls: &Bound<'_, PyDict>, ws: &Bound<'_, PyDict>) -> PyResult<crate::elemmesh::MeshDoc> {
+        let mut c: rustc_hash::FxHashMap<u64, String> = Default::default();
+        for (k, v) in cls.iter() { c.insert(k.extract()?, v.extract()?); }
+        let mut w: rustc_hash::FxHashMap<u64, i64> = Default::default();
+        for (k, v) in ws.iter() { w.insert(k.extract()?, v.extract()?); }
+        let ctx = crate::elemmesh::Ctx::new(self.schema.clone(), self.g103_idx.clone(), c, w);
+        let conv = Conv::new(py, &self.schema, self.conv.eid.clone_ref(py));
+        crate::elemmesh::MeshDoc::new(py, ctx, conv)
     }
 
     /// ElemTable ids (sorted) used by extract_chunk

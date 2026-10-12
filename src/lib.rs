@@ -6,6 +6,8 @@ mod decoder;
 mod extract;
 mod g103;
 mod es;
+mod mesh;
+mod elemmesh;
 use flate2::read::DeflateDecoder;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;

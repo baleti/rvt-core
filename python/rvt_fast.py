@@ -203,9 +203,20 @@ def _install_memo():
     EM.element_mesh = element_mesh
 
 def element_mesh(doc, eid, symbol_depth=2, detail=3):
-    """== rvt_elemmesh.element_mesh"""
+    """== rvt_elemmesh.element_mesh (Python mesh code on the fast Doc)"""
     import rvt_elemmesh as EM
     return EM.element_mesh(doc, eid, symbol_depth, detail)
+
+def mesh_doc(doc):
+    """the Rust element-mesh context of a fast Doc (built once)"""
+    md = getattr(doc, '_md', None)
+    if md is None:
+        cen = doc._census(); md = doc._md = doc._g.rd.mesh_doc(cen['cls'], cen['ws'])
+    return md
+
+def element_mesh_rust(doc, eid, symbol_depth=2, detail=3):
+    """rvt_elemmesh.element_mesh computed in Rust (tests/diff_mesh.py --impl rust compares it with the reference)"""
+    return mesh_doc(doc).element_mesh(int(eid), symbol_depth, detail)
 
 # ---------------- progress file + streaming meshes for the viewer ----------------
 def file_key(f):

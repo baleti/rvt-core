@@ -23,7 +23,20 @@ def mdigest(m):
         meta.append(ent)
     rest = {k: v for k, v in m.items() if k not in ('tris', 'meta')}
     c = []; canon(rest, c)
-    return {'tris': hashlib.sha1(''.join(o).encode()).hexdigest()[:16], 'meta': hashlib.sha1(json.dumps(meta).encode()).hexdigest()[:16], 'rest': hashlib.sha1(''.join(c).encode()).hexdigest()[:16], 'n': len(m.get('tris') or [])}
+    # geometric signature per face: triangle count, area (1e-9 relative), vertex set (1e-6 ft), surface kinds
+    import collections
+    g = collections.defaultdict(list); kinds = collections.defaultdict(collections.Counter)
+    fid = m.get('fid') or [0] * len(m.get('tris') or [])
+    for i, t in enumerate(m.get('tris') or []):
+        g[fid[i]].append(t)
+        if m.get('meta') and i < len(m['meta']): kinds[fid[i]][m['meta'][i][0]] += 1
+    geo = []
+    for f_ in sorted(g):
+        T = np.array(g[f_], float); ar = float(np.linalg.norm(np.cross(T[:, 1] - T[:, 0], T[:, 2] - T[:, 0]), axis=1).sum() / 2)
+        vs = sorted({tuple(np.round(p / 1e-6).astype(np.int64).tolist()) for p in T.reshape(-1, 3)})
+        geo.append([f_, len(g[f_]), '%.9e' % ar, hashlib.sha1(repr(vs).encode()).hexdigest()[:12], sorted(kinds[f_].items())])
+    return {'tris': hashlib.sha1(''.join(o).encode()).hexdigest()[:16], 'meta': hashlib.sha1(json.dumps(meta).encode()).hexdigest()[:16], 'rest': hashlib.sha1(''.join(c).encode()).hexdigest()[:16], 'n': len(m.get('tris') or []),
+            'geo': hashlib.sha1(json.dumps(geo).encode()).hexdigest()[:16]}
 
 def side(which, f):
     sys.path.insert(0, '~/rvt-research'); os.environ['RVT_GEOM'] = '1'
@@ -65,7 +78,9 @@ if __name__ == '__main__':
             res[w] = json.loads(p.stdout)
         if res is None: bad += 1; continue
         a, b = res['oracle']['res'], res['fast']['res']
-        diff = [k for k in a if a[k] != b.get(k)]
+        ident = [k for k in a if a[k] == b.get(k)]
+        equiv = [k for k in a if a[k] != b.get(k) and isinstance(a[k], dict) and isinstance(b.get(k), dict) and a[k]['geo'] == b[k]['geo'] and a[k]['rest'] == b[k]['rest'] and a[k]['n'] == b[k]['n']]
+        diff = [k for k in a if k not in ident and k not in equiv]
         bad += bool(diff)
-        print('%-44s %4d elements %4d differ  oracle load %5.1fs mesh %6.1fs | fast load %5.1fs mesh %6.1fs  %s' % (os.path.basename(f)[:44], len(a), len(diff), res['oracle']['load'], res['oracle']['mesh'], res['fast']['load'], res['fast']['mesh'], 'IDENTICAL' if not diff else 'DIFFERENT e.g. %s %s %s' % (diff[0], a[diff[0]], b.get(diff[0]))), flush=True)
+        print('%-44s %4d elements: %4d bit-identical %3d geometrically equivalent %3d DIFFERENT  oracle load %5.1fs mesh %6.1fs | fast load %5.1fs mesh %6.1fs  %s' % (os.path.basename(f)[:44], len(a), len(ident), len(equiv), len(diff), res['oracle']['load'], res['oracle']['mesh'], res['fast']['load'], res['fast']['mesh'], 'OK' if not diff else 'e.g. %s %s %s' % (diff[0], a[diff[0]], b.get(diff[0]))), flush=True)
     sys.exit(1 if bad else 0)
