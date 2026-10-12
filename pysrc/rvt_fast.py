@@ -270,11 +270,32 @@ def element_mesh(doc, eid, symbol_depth=2, detail=3):
     import rvt_elemmesh as EM
     return EM.element_mesh(doc, eid, symbol_depth, detail)
 
+def _with_mat(doc, r, compact):
+    """Rust mesh -> reference result: per-triangle 'mat' from the raw (face render style, node graphics style) keys through the reference's
+    rvt_elemmesh._material_of (memoised per document, as in the reference); 'mat' is the first key like in the reference dict"""
+    if r is None or 'mat_keys' not in r: return r
+    import rvt_elemmesh as EM
+    keys = r.pop('mat_keys'); idx = r.pop('mat_idx')
+    vals = [EM._material_of(doc, rs, ns) for rs, ns in keys]
+    if compact:
+        import numpy as np
+        r['mat'] = np.array(vals + [-1], dtype=np.int64)[idx] if len(idx) else np.zeros(0, np.int64)
+        return r
+    return dict(mat=[vals[i] if i >= 0 else -1 for i in idx], **r)
+
+class _MeshDoc:
+    """the Rust MeshDoc with reference-shaped results (per-triangle 'mat' resolved in Python)"""
+    def __init__(s, doc, md): s.doc = doc; s.md = md
+    def element_mesh(s, eid, symbol_depth=2, detail=3):
+        return _with_mat(s.doc, s.md.element_mesh(int(eid), symbol_depth, detail), False)
+    def element_meshes(s, ids, symbol_depth=2, detail=3, compact=False):
+        return [_with_mat(s.doc, r, compact) for r in s.md.element_meshes(ids, symbol_depth, detail, compact)]
+
 def mesh_doc(doc):
     """the Rust element-mesh context of a fast Doc (built once)"""
     md = getattr(doc, '_md', None)
     if md is None:
-        cen = doc._census(); md = doc._md = doc._g.rd.mesh_doc(cen['cls'], cen['ws'])
+        cen = doc._census(); md = doc._md = _MeshDoc(doc, doc._g.rd.mesh_doc(cen['cls'], cen['ws']))
     return md
 
 def element_mesh_rust(doc, eid, symbol_depth=2, detail=3):

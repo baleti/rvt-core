@@ -61,7 +61,7 @@ impl K {
             "m_pProfileCurve2", "m_Point1", "m_Point2", "m_origin", "m_edgeMap", "m_firstAndLastEdgePnts", "m_pFace", "uv", "m_interiorEdgePnts", "m_next", "m_prev",
             "m_pSurf", "m_pFirstLoop", "m_Envelope", "m_corners", "m_pointsArr", "m_facetsArr", "m_Knots", "m_pitchOver2PI", "m_oBaseCurve", "m_xLen", "m_yLen", "m_dirVec",
             "m_endParams", "m_iParametr", "m_Degree", "m_ctrlPoints", "m_xyz", "m_pnt", "m_point", "m_pt", "m_weight", "m_w", "m_basePnt", "m_referenceVector",
-            "m_signedOffsetDistance", "m_pEdges",
+            "m_signedOffsetDistance", "m_pEdges", "m_renderStyleId",
         ];
         let mut m = FxHashMap::default();
         for n in names { m.insert(n, s.key_of.get(n).copied().unwrap_or(u32::MAX)); }
@@ -71,7 +71,7 @@ impl K {
         m.insert("ptr", K_PTR);
         K { m }
     }
-    #[inline] pub fn k(&self, n: &str) -> u32 { *self.m.get(n).unwrap_or(&u32::MAX) }
+    #[inline] pub fn k(&self, n: &str) -> u32 { debug_assert!(self.m.contains_key(n), "field name {} not registered in K::new", n); *self.m.get(n).unwrap_or(&u32::MAX) }
 }
 
 // ---------------- dict helpers mirroring Python semantics ----------------
@@ -1061,6 +1061,8 @@ pub struct Tess {
     pub meta: Vec<Meta>,
     pub fidx: Vec<i64>,
     pub fprio: Vec<(i64, bool)>,
+    /// m_renderStyleId of face nf (index nf - 1): the reference's per-triangle `frs` is frs[fidx - 1]
+    pub frs: Vec<Val>,
     pub unsup: Vec<&'static str>,
     pub faces: i64,
 }
@@ -1105,6 +1107,7 @@ pub fn tessellate(kk: &K, faces: &[&Val], edges: &EdgeMap, earcut: Earcut) -> Rs
     for fc in faces {
         let f = ob(fc);
         if !is_dict(f) { continue; }
+        let rs = dget(f, kk.k("m_renderStyleId")).cloned().unwrap_or(Val::None);
         let sv = dget(f, ksurf).unwrap_or(&Val::None);
         let (kind, ev) = match surface_eval(kk, sv)? { Some(x) => x, None => { out.unsup.push("surface"); continue; } };
         let ev = Arc::new(ev);
@@ -1222,7 +1225,7 @@ pub fn tessellate(kk: &K, faces: &[&Val], edges: &EdgeMap, earcut: Earcut) -> Rs
                         if ve.len() > 2 { vs = ve; }
                         let (nu, nv) = (us.len() - 1, vs.len() - 1);
                         nf += 1;
-                        out.fprio.push((nf, pr));
+                        out.fprio.push((nf, pr)); out.frs.push(rs.clone());
                         let mut v = vec![];
                         for i in 0..nu {
                             for j in 0..nv {
@@ -1269,7 +1272,7 @@ pub fn tessellate(kk: &K, faces: &[&Val], edges: &EdgeMap, earcut: Earcut) -> Rs
                         ring.extend(s);
                     }
                     nf += 1;
-                    out.fprio.push((nf, pr));
+                    out.fprio.push((nf, pr)); out.frs.push(rs.clone());
                     let n = ring.len() as u32;
                     jobs.push(Job::Ear { verts: ring, ends: vec![n], nf, kind, ev: ev.clone(), drop_degenerate: true });
                     continue;
@@ -1278,7 +1281,7 @@ pub fn tessellate(kk: &K, faces: &[&Val], edges: &EdgeMap, earcut: Earcut) -> Rs
         }
         if loops.is_empty() { out.unsup.push("noloops"); continue; }
         nf += 1;
-        out.fprio.push((nf, pr));
+        out.fprio.push((nf, pr)); out.frs.push(rs.clone());
         for (outer, holes) in group_loops(&loops) {
             let mut verts = nudge_repeats(&outer);
             let mut ends = vec![verts.len() as u32];
@@ -1579,4 +1582,36 @@ pub fn select_closed_shell(tris: &[Tri], meta: &[Meta], fidx: &[i64], prio: Opti
     let mut ot = vec![]; let mut om = vec![]; let mut of = vec![];
     for f in &keep { for &i in &faces[f] { ot.push(tris[i]); om.push(meta[i].clone()); of.push(*f); } }
     (ot, om, true, Some(of))
+}
+
+/// rvt_mesh.mesh_volume(tris)[2]: unmatched edges (edge used by != 2 triangles after welding at tol), 0 when the winding is already consistent with a positive volume
+pub fn mesh_open_edges(tris: &[Tri], tol: f64) -> usize {
+    if tris.is_empty() { return 0; }
+    let mut vid: FxHashMap<Key3, usize> = FxHashMap::default();
+    let mut vp: Vec<V3> = vec![];
+    let mut tt: Vec<[usize; 3]> = vec![];
+    for t in tris {
+        let mut ids = [0usize; 3];
+        for i in 0..3 { let k = key3(t[i], tol); let n = vid.len(); ids[i] = *vid.entry(k).or_insert_with(|| { vp.push(t[i]); n }); }
+        if ids[0] != ids[1] && ids[1] != ids[2] && ids[0] != ids[2] { tt.push(ids); }
+    }
+    // V[vid[key(p)]] = p: the last point with that key wins
+    for t in tris { for p in t { vp[vid[&key3(*p, tol)]] = *p; } }
+    let mut em: FxHashMap<(usize, usize), usize> = FxHashMap::default();
+    let mut de: FxHashMap<(usize, usize), usize> = FxHashMap::default();
+    for t in &tt {
+        for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] { *em.entry((a.min(b), a.max(b))).or_insert(0) += 1; *de.entry((a, b)).or_insert(0) += 1; }
+    }
+    if !tt.is_empty() && de.iter().all(|((a, b), c)| de.get(&(*b, *a)).copied().unwrap_or(0) == *c) {
+        let v: Vec<f64> = tt.iter().map(|t| dot(vp[t[0]], cross(vp[t[1]], vp[t[2]]))).collect();
+        if np_sum(&v) / 6.0 > 0.0 { return 0; }
+    }
+    em.values().filter(|n| **n != 2).count()
+}
+
+/// rvt_mesh.nearly_closed(tris, frac, min_tris)
+pub fn nearly_closed(tris: &[Tri], frac: f64, min_tris: usize) -> bool {
+    if tris.len() < min_tris { return false; }
+    if tjunction_closed(tris, 5e-5) { return true; }
+    (mesh_open_edges(tris, 5e-5) as f64) <= frac * 1.5 * tris.len() as f64
 }

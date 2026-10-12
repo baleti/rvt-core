@@ -21,6 +21,27 @@ pub struct EMesh {
     pub source: &'static str,
     pub flags: Vec<String>,
     pub bbox: Option<Val>,
+    /// per triangle: index into mkeys, -1 = unassigned (the reference's `mat` = _material_of(doc, *mkeys[i]) or -1)
+    pub mk: Vec<i32>,
+    /// (face m_renderStyleId, Geometry node m_GInfo.m_categoryId) material keys
+    pub mkeys: Vec<(Val, Val)>,
+}
+
+/// rvt_elemmesh._node_style
+fn node_style(kk: &K, g: &Val) -> Val {
+    match dget(g, kk.k("m_GInfo")) { Some(gi) if truthy(gi) => dget(gi, kk.k("m_categoryId")).cloned().unwrap_or(Val::None), _ => Val::None }
+}
+
+/// rvt_elemmesh._tri_mats for one tessellation of node g: per-triangle key indices, keys appended to `keys` (one per face that has triangles)
+fn tri_mats(kk: &K, t: &Tess, g: &Val, keys: &mut Vec<(Val, Val)>, face_key: &mut FxHashMap<i64, i32>) -> Vec<i32> {
+    let ns = node_style(kk, g);
+    face_key.clear();
+    t.fidx.iter().map(|&f| {
+        *face_key.entry(f).or_insert_with(|| {
+            let rs = if f >= 1 { t.frs.get((f - 1) as usize).cloned().unwrap_or(Val::None) } else { Val::None };
+            keys.push((rs, ns.clone())); (keys.len() - 1) as i32
+        })
+    }).collect()
 }
 
 pub struct Ctx {
@@ -174,6 +195,9 @@ impl Ctx {
         let mut un: usize = 0;
         let mut nface: i64 = 0;
         let mut ownp: FxHashMap<i64, bool> = FxHashMap::default();
+        let mut mkeys: Vec<(Val, Val)> = vec![];
+        let mut fmat: FxHashMap<i64, i32> = FxHashMap::default();
+        let mut fk: FxHashMap<i64, i32> = FxHashMap::default();
         let cat_ok = |g: &Val| -> bool {
             match dget(g, kk.k("m_GInfo")).and_then(|gi| dget(gi, kk.k("m_categoryId"))).and_then(|c| c.as_int()) {
                 Some(c) => c != 0xFFFF_FFFF && c != 0xFFFF_FFFF_FFFF_FFFF,
@@ -186,6 +210,8 @@ impl Ctx {
             for (gi, g) in geos.iter().enumerate() {
                 let t = faces_in_bbox(kk, g, bb, 0.02, ec)?;
                 let n = t.tris.len();
+                let tm = tri_mats(kk, &t, g, &mut mkeys, &mut fk);
+                for (f, m) in t.fidx.iter().zip(tm) { fmat.insert(nface + f, m); }
                 own.extend(t.tris);
                 ownm.extend(t.meta);
                 ownf.extend(t.fidx.iter().map(|f| nface + f));
@@ -210,6 +236,7 @@ impl Ctx {
                         let f: Vec<i64> = ix.iter().map(|&i| ownf[i]).collect();
                         let (st, sm, ok, lf) = select_closed_shell(&t, &m, &f, Some(&ownp));
                         if ok { per.push((st, sm, lf.unwrap(), *g)); }
+                        else if nearly_closed(&t, 0.06, 40) { per.push((t, m, f, *g)); }        // trimmed curved faces whose boundary samples do not weld exactly
                     }
                 }
                 if !per.is_empty() {
@@ -236,6 +263,7 @@ impl Ctx {
                 }
             }
             let (mut xt, mut xm, mut xn, mut xf): (Vec<Tri>, Vec<Meta>, Vec<i64>, Vec<i64>) = (vec![], vec![], vec![], vec![]);
+            let mut xmat: Vec<i32> = vec![];
             if !inst.is_empty() && depth > 0 {
                 let inst_sym: Vec<&Val> = inst.iter().copied().filter(|z| {
                     if !matches!(dget(z, kk.k("m_oEmbeddedSymbolGRep")), None | Some(Val::None)) { return false; }
@@ -244,8 +272,8 @@ impl Ctx {
                     c.unwrap_or("").ends_with("Symbol") || (c == Some("WallSweep") && !self.is_reveal(sid))
                 }).collect();
                 if !inst_sym.is_empty() {
-                    let r = self.inst_parts(&inst_sym, depth, detail, &mut flags, ec)?;
-                    xt = r.0; xm = r.1; xn = r.2; xf = r.3;
+                    let r = self.inst_parts(&inst_sym, depth, detail, &mut flags, ec, &mut mkeys)?;
+                    xt = r.0; xm = r.1; xn = r.2; xf = r.3; xmat = r.4;
                 }
                 if !xt.is_empty() {
                     let mut have: rustc_hash::FxHashSet<[[i64; 3]; 3]> = Default::default();
@@ -264,6 +292,7 @@ impl Ctx {
                         let hit = ix.iter().filter(|&&i| have.contains(&sig(&xt[i]))).count();
                         if (hit as f64) < 0.5 * ix.len() as f64 { keep_i.extend(ix.iter().copied()); }
                     }
+                    xmat = keep_i.iter().map(|&i| xmat[i]).collect();
                     xt = keep_i.iter().map(|&i| xt[i]).collect();
                     xm = keep_i.iter().map(|&i| xm[i].clone()).collect();
                     xn = keep_i.iter().map(|&i| xn[i]).collect();
@@ -271,6 +300,10 @@ impl Ctx {
                 }
                 if !xt.is_empty() { flags.push("plus_instances".into()); }
             }
+            let mut mk: Vec<i32> = if ownf.len() == own.len() { ownf.iter().map(|f| *fmat.get(f).unwrap_or(&-1)).collect() } else { vec![-1; own.len()] };
+            if xmat.len() != xt.len() { xmat = vec![-1; xt.len()]; }
+            mk.extend(std::iter::repeat(-1).take(pm.len()));
+            mk.extend(xmat);
             let mut fid: Vec<i64> = if ownf.len() == own.len() { ownf } else { (0..own.len() as i64).collect() };
             fid.extend(std::iter::repeat(10_000_000).take(pm.len()));
             fid.extend(xf.iter().map(|f| 20_000_000 + f));
@@ -284,15 +317,18 @@ impl Ctx {
             tris.extend(pm);
             tris.extend(xt);
             if un > 0 { flags.push("unsupported_faces".into()); }
-            return Ok(EMesh { none: false, tris, fid, nid, meta, source: "own_geometry_in_bbox", flags, bbox: bbv });
+            return Ok(EMesh { none: false, tris, fid, nid, meta, source: "own_geometry_in_bbox", flags, bbox: bbv, mk, mkeys });
         }
         if !inst.is_empty() && depth > 0 {
-            let (t, m, n, f) = self.inst_parts(&inst, depth, detail, &mut flags, ec)?;
-            if !t.is_empty() { return Ok(EMesh { none: false, tris: t, fid: f, nid: n, meta: m, source: "symbol_instance", flags, bbox: bbv }); }
+            let mut ik: Vec<(Val, Val)> = vec![];
+            let (t, m, n, f, mk) = self.inst_parts(&inst, depth, detail, &mut flags, ec, &mut ik)?;
+            if !t.is_empty() { return Ok(EMesh { none: false, tris: t, fid: f, nid: n, meta: m, source: "symbol_instance", flags, bbox: bbv, mk, mkeys: ik }); }
         }
         let mut allt = vec![]; let mut allm = vec![]; let mut alln = vec![]; let mut allf = vec![];
+        let mut allk: Vec<(Val, Val)> = vec![]; let mut allmk: Vec<i32> = vec![];
         for (gi, g) in geos.iter().enumerate() {
             let t = tessellate_geometry(kk, g, ec)?;
+            allmk.extend(tri_mats(kk, &t, g, &mut allk, &mut fk));
             alln.extend(std::iter::repeat(gi as i64).take(t.tris.len()));
             allf.extend(t.fidx.iter().map(|f| gi as i64 * 100000 + f));
             allt.extend(t.tris);
@@ -300,7 +336,7 @@ impl Ctx {
             un += t.unsup.len();
         }
         if un > 0 { flags.push("unsupported_faces".into()); }
-        Ok(EMesh { none: false, tris: allt, fid: allf, nid: alln, meta: allm, source: "all_geometry", flags, bbox: bbv })
+        Ok(EMesh { none: false, tris: allt, fid: allf, nid: alln, meta: allm, source: "all_geometry", flags, bbox: bbv, mk: allmk, mkeys: allk })
     }
 
     fn is_reveal(&self, sid: Option<&Val>) -> bool {
@@ -308,7 +344,8 @@ impl Ctx {
     }
 
     /// rvt_elemmesh._inst_parts -> (tris, metas, nids, fids)
-    fn inst_parts(&self, inst: &[&Val], depth: i32, detail: i64, flags: &mut Vec<String>, ec: Earcut) -> Rs<(Vec<Tri>, Vec<Meta>, Vec<i64>, Vec<i64>)> {
+    /// (+ per-triangle material key indices into `keys`: the reference's _inst_parts.last_mat)
+    fn inst_parts(&self, inst: &[&Val], depth: i32, detail: i64, flags: &mut Vec<String>, ec: Earcut, keys: &mut Vec<(Val, Val)>) -> Rs<(Vec<Tri>, Vec<Meta>, Vec<i64>, Vec<i64>, Vec<i32>)> {
         let kk = &self.kk;
         let forb = |z: &Val| -> bool {
             match dget(z, kk.k("m_forbiddenTarget")) { Some(ft) if is_dict(ft) => dget(ft, kk.k("m_targets")).map_or(false, truthy), _ => false }
@@ -320,6 +357,7 @@ impl Ctx {
             if self.cls_of(dget(ii, kk.k("m_symbolId"))) != Some("FamilyInstance") { keep.push(z); }
         }
         let (mut tris, mut metas, mut nids, mut fids) = (vec![], vec![], vec![], vec![]);
+        let mut mats: Vec<i32> = vec![];
         let mut ninst: i64 = 0;
         for z in keep {
             let ii = ob(idx(z, kk.k("m_instanceInfo"))?);
@@ -338,6 +376,11 @@ impl Ctx {
             let n = sub.tris.len();
             if !sub.fid.is_empty() { fids.extend(sub.fid.iter().map(|f| ninst * 1_000_000 + f)); } else { fids.extend((0..n as i64).map(|f| ninst * 1_000_000 + f)); }
             if !sub.nid.is_empty() { nids.extend(sub.nid.iter().map(|x| ninst * 100000 + x)); } else { nids.extend(std::iter::repeat(ninst * 100000).take(n)); }
+            if sub.mk.len() == n {
+                let off = keys.len() as i32;
+                keys.extend(sub.mkeys.iter().cloned());
+                mats.extend(sub.mk.iter().map(|&k| if k < 0 { -1 } else { k + off }));
+            } else { mats.extend(std::iter::repeat(-1).take(n)); }
             for tr in &sub.tris { tris.push([add(matvec(&r, tr[0]), o), add(matvec(&r, tr[1]), o), add(matvec(&r, tr[2]), o)]); }
             if !sub.meta.is_empty() && sub.meta.len() == n {
                 for m in &sub.meta {
@@ -348,7 +391,7 @@ impl Ctx {
                 metas.extend(std::iter::repeat(Meta { kind: "plane", ev: MetaEv::None, uv: None }).take(n));
             }
         }
-        Ok((tris, metas, nids, fids))
+        Ok((tris, metas, nids, fids, mats))
     }
 }
 
@@ -465,6 +508,16 @@ impl MeshDoc {
             }
         }
             }
+        if !m.none {
+            let ks = PyList::empty_bound(py);
+            for (a, b) in &m.mkeys { ks.append(PyTuple::new_bound(py, [self.conv.val(py, a, &[])?, self.conv.val(py, b, &[])?]))?; }
+            d.set_item("mat_keys", ks)?;
+            if compact {
+                let mut b = Vec::with_capacity(m.mk.len() * 4);
+                for x in &m.mk { b.extend_from_slice(&x.to_le_bytes()); }
+                d.set_item("mat_idx", np.getattr("frombuffer")?.call1((PyBytes::new_bound(py, &b), "<i4"))?.call_method0("copy")?)?;
+            } else { d.set_item("mat_idx", PyList::new_bound(py, &m.mk))?; }
+        }
         d.set_item("source", m.source)?;
         d.set_item("flags", PyList::new_bound(py, &m.flags))?;
         if !m.none {

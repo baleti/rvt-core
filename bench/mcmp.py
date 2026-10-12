@@ -17,7 +17,7 @@ for e in ids:
     tb += time.time() - t
     if (a is None) != (b is None): bad += 1; ex.append((e, 'exc', a is None)); continue
     if a is None: continue
-    same = len(a['tris']) == len(b['tris']) and a['flags'] == b['flags'] and a['source'] == b['source'] and a.get('fid') == b.get('fid') and a.get('nid') == b.get('nid')
+    same = len(a['tris']) == len(b['tris']) and a['flags'] == b['flags'] and a['source'] == b['source'] and a.get('fid') == b.get('fid') and a.get('nid') == b.get('nid') and a.get('mat') == b.get('mat')
     if same and a['tris']:
         A = np.array([p for t_ in a['tris'] for p in t_]); B = np.array([p for t_ in b['tris'] for p in t_])
         dmax = float(np.abs(A - B).max())

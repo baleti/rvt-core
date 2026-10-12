@@ -33,6 +33,7 @@ def _result(r, full=None):
     surf = [names[i] for i in r['surf'].tolist()] if 'surf' in r else None
     raw = full is not None and len(r['tris']) <= 1500 and surf is not None and any(k in CURVED for k in surf)
     return {'confidence': 'mesh_approx', 'flags': ['saved_graphics_tessellation'] + list(r['flags']), 'nid': r['nid'].tolist(), 'fid': r['fid'].tolist(),
+            'mat': [int(x) for x in r['mat'].tolist()] if r.get('mat') is not None and len(r['mat']) == len(r['tris']) else None,
             'surf': surf, 'tris_raw': full['tris'] if raw else None, 'meta_raw': full['meta'] if raw else None,
             'solids': [{'kind': 'triangle_mesh', 'triangles': P.round(6).tolist(), 'source': r['source']}]}
 
