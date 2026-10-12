@@ -263,7 +263,7 @@ impl RecDecoder {
         let keys: Vec<String> = match serde_json::from_value(hdr["keys"].clone()) { Ok(k) => k, Err(_) => return Ok(None) };
         let kt: Vec<Py<PyString>> = keys.iter().map(|k| PyString::intern_bound(py, k).unbind()).collect();
         let geo = PyString::new_bound(py, "<geometry not decoded>");
-        let mut rd = crate::cache::Rd { b, p: 12 + n };
+        let mut rd = crate::cache::Rd { b, p: 12 + n, em: Default::default() };
         let recs = PyDict::new_bound(py);
         let eh = PyDict::new_bound(py);
         while rd.p < b.len() {

@@ -30,6 +30,28 @@ def _decoder_default_config():
     import rvt_decode as D
     return not (D.load_hints() or os.environ.get('RVT_GG', '0') != '0' or os.environ.get('RVT_M') or os.environ.get('RVT_K5'))
 
+def _pk_write(fn, obj):
+    """write one .pk cache file atomically and drop older versions of the same kind for the same file (<key>-<kind><version>.pk)"""
+    import rvt_decode as D
+    os.makedirs(CACHE, exist_ok=True); tmp = fn + '.%d.tmp' % os.getpid()
+    open(tmp, 'wb').write(_rc().pack(obj, D.EID)); os.replace(tmp, fn)
+    b = os.path.basename(fn); pre = b[:b.index('-') + 2]
+    for o in os.listdir(CACHE):
+        if o.startswith(pre) and o.endswith('.pk') and o != b:
+            try: os.remove(os.path.join(CACHE, o))
+            except OSError: pass
+
+class _nogc:
+    """pause the cyclic GC while a cache load builds millions of acyclic objects (its passes would only rescan them)"""
+    def __enter__(s):
+        import gc; s.on = gc.isenabled(); gc.disable()
+    def __exit__(s, *a):
+        import gc
+        if s.on: gc.enable()
+
+def _unpack(fn, eid_t):
+    with _nogc(): return _rc().unpack(fn, eid_t)
+
 def on():
     """True when the Rust paths apply (extension present, RVT_NOFAST unset, decoder in its default configuration). Hooks in the oracle call
     rvt_fast only when on() is True, and rvt_fast calls the oracle only when it is False: no recursion."""
@@ -623,7 +645,7 @@ class Model:
         fn = os.path.join(CACHE, '%s-q%s.pk' % (s.key, params_version()))
         if _cache_on() and os.path.exists(fn) and s._x is None:
             try:
-                q = _rc().unpack(fn, D.EID)
+                q = _unpack(fn, D.EID)
                 q['elements'] = {int(k): v for k, v in q['elements'].items()}
                 s._set(done=1, elements_decoded=len(q['elements'])); return q
             except Exception: pass
@@ -651,11 +673,20 @@ class Model:
         levels.sort(key=lambda l: (l['elevation_ft'] is None, l['elevation_ft']))
         q = {'elements': els, 'levels': levels, 'grids': grids, 'W': W}
         if _cache_on():
-            try: os.makedirs(CACHE, exist_ok=True); tmp = fn + '.%d.tmp' % os.getpid(); open(tmp, 'wb').write(_rc().pack(q, D.EID)); os.replace(tmp, fn)
+            try: _pk_write(fn, q)
             except Exception: pass
         s._set(done=1, elements_decoded=len(els))
         return q
     def full(s):
+        import gc
+        on_ = gc.isenabled(); gc.disable()
+        try: x, p = s._full()
+        finally:
+            if on_: gc.enable()
+        # the model is millions of long-lived acyclic objects: move them out of the collector's generations (else the next passes rescan them all, ~0.3-0.8 s)
+        if not os.environ.get('RVT_CORE_NOFREEZE'): gc.freeze()
+        return x, p
+    def _full(s):
         import rvt_decode as D
         s._set('extract', total=1)
         if s._x is None:
@@ -667,12 +698,12 @@ class Model:
         fn = os.path.join(CACHE, '%s-p%s.pk' % (s.key, params_version()))
         p = None
         if _cache_on() and os.path.exists(fn):
-            try: p = _rc().unpack(fn, D.EID)
+            try: p = _unpack(fn, D.EID)
             except Exception: p = None
         if p is None:
             p = params(s.path, x)
             if _cache_on():
-                try: os.makedirs(CACHE, exist_ok=True); tmp = fn + '.%d.tmp' % os.getpid(); open(tmp, 'wb').write(_rc().pack(p, D.EID)); os.replace(tmp, fn)
+                try: _pk_write(fn, p)
                 except Exception: pass
         s._set(done=1)
         return x, p
@@ -691,14 +722,14 @@ class Model:
         if s._mc is None:
             s._mc = {}
             if _cache_on() and os.path.exists(s._mesh_fn()):
-                try: s._mc = _rc().unpack(s._mesh_fn(), D.EID)
+                try: s._mc = _unpack(s._mesh_fn(), D.EID)
                 except Exception: s._mc = {}
         return s._mc
     def _mesh_cache_add(s, new):
         import rvt_decode as D
         if not _cache_on() or not new: return
         mc = s._mesh_cache(); mc.update(new)
-        try: os.makedirs(CACHE, exist_ok=True); fn = s._mesh_fn(); tmp = fn + '.%d.tmp' % os.getpid(); open(tmp, 'wb').write(_rc().pack(mc, D.EID)); os.replace(tmp, fn)
+        try: fn = s._mesh_fn(); _pk_write(fn, mc)
         except Exception: pass
     def start_meshes(s, ids, chunk=128, compact=True):
         return MeshStream(s, ids, chunk, compact)
@@ -710,12 +741,12 @@ class Model:
         import rvt_decode as D
         fn = os.path.join(CACHE, '%s-i%s.pk' % (s.key, mesh_version()))
         if _cache_on() and os.path.exists(fn):
-            try: return list(_rc().unpack(fn, D.EID))
+            try: return list(_unpack(fn, D.EID))
             except Exception: pass
         d = s.doc(); cen = d._census()
         ids = [e for e, i in d.res.items() if i.get('bbox') and cen['cls'].get(e) and not cen['cls'][e].endswith('Symbol')]
         if _cache_on():
-            try: os.makedirs(CACHE, exist_ok=True); tmp = fn + '.%d.tmp' % os.getpid(); open(tmp, 'wb').write(_rc().pack(ids, D.EID)); os.replace(tmp, fn)
+            try: _pk_write(fn, ids)
             except Exception: pass
         return ids
     def close(s):

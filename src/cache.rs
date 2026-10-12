@@ -50,8 +50,15 @@ pub fn put_rec(o: &mut Vec<u8>, r: &Rec, slim: bool) {
     put_val(o, &r.fields, &r.slots);
 }
 
-pub struct Rd<'a> { pub b: &'a [u8], pub p: usize }
+/// em: one shared rvt_decode.EID instance per value (immutable int subclass: 0.5M ids of a 6 MB file have ~15k distinct values)
+pub struct Rd<'a> { pub b: &'a [u8], pub p: usize, pub em: rustc_hash::FxHashMap<i128, PyObject> }
 impl<'a> Rd<'a> {
+    fn eid(&mut self, py: Python<'_>, c: &crate::conv::Conv, x: i128) -> PyResult<PyObject> {
+        if let Some(o) = self.em.get(&x) { return Ok(o.clone_ref(py)); }
+        let o = if x < 0 { c.eid.bind(py).call1((x as i64,))?.unbind() } else { c.eid.bind(py).call1((x as u64,))?.unbind() };
+        self.em.insert(x, o.clone_ref(py));
+        Ok(o)
+    }
     #[inline] fn u8(&mut self) -> PyResult<u8> { let v = *self.b.get(self.p).ok_or_else(|| PyValueError::new_err("truncated cache"))?; self.p += 1; Ok(v) }
     #[inline] fn n<const N: usize>(&mut self) -> PyResult<[u8; N]> {
         if self.p + N > self.b.len() { return Err(PyValueError::new_err("truncated cache")); }
@@ -90,8 +97,8 @@ impl<'a> Rd<'a> {
                 }
                 d.into_py(py)
             }
-            9 => c.eid.bind(py).call1((i64::from_le_bytes(self.n::<8>()?),))?.unbind(),
-            10 => c.eid.bind(py).call1((u64::from_le_bytes(self.n::<8>()?),))?.unbind(),
+            9 => { let x = i64::from_le_bytes(self.n::<8>()?); self.eid(py, c, x as i128)? }
+            10 => { let x = u64::from_le_bytes(self.n::<8>()?); self.eid(py, c, x as i128)? }
             11 => {
                 let d = PyDict::new_bound(py);
                 d.set_item(keys[crate::dec::K_HANDLE as usize].bind(py), self.u32()?)?;
