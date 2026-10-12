@@ -3,14 +3,12 @@
 //! Every message text that can end up in the output (record 'error') reproduces the Python reference exactly.
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
-use std::sync::Arc;
 
 pub const K_HANDLE: u32 = 0;
 pub const K_PTR: u32 = 1;
 pub const K_OBJ: u32 = 2;
 pub const K_REF: u32 = 3;
 pub const K_ES: u32 = 4;
-const NSPECIAL: u32 = 5;
 
 #[derive(Clone, Debug)]
 pub struct Field {
@@ -244,7 +242,6 @@ fn slice(b: &[u8], a: usize, e: usize) -> &[u8] {
 #[derive(Clone, Copy)]
 enum PathEl {
     Top(u32),
-    Cls(usize),
     Fld(usize, usize),
     Star(u32),
     StarEs,
@@ -285,7 +282,6 @@ impl<'s> Dec<'s> {
         for e in &self.path {
             match *e {
                 PathEl::Top(t) => parts.push(self.s.cname(t)),
-                PathEl::Cls(k) => parts.push(self.s.classes[k].name.clone()),
                 PathEl::Fld(k, f) => {
                     parts.push(self.s.classes[k].name.clone());
                     parts.push(self.s.classes[k].fields[f].name.clone())
@@ -698,4 +694,3 @@ pub fn parse_pair(tn: &str) -> Option<(String, String)> {
     Some((k, v))
 }
 
-pub type SchemaRef = Arc<Schema>;

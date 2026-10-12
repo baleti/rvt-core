@@ -1,6 +1,6 @@
 """quick Rust-vs-Python element_mesh comparison on the fast Doc: python bench/mcmp.py FILE N"""
 import sys, time, os
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'python')); import rvt_fast as RF
+sys.path.insert(0, os.environ.get('RVT_FAST_DIR') or os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'python')); import rvt_fast as RF
 import numpy as np
 f = sys.argv[1]; N = int(sys.argv[2])
 d = RF.Doc(f); cen = d._census()

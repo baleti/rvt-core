@@ -6,6 +6,7 @@ use rayon::prelude::*;
 pub const GZ4: [u8; 4] = [0x1f, 0x8b, 0x08, 0x00];
 
 pub struct Member {
+    #[allow(dead_code)]
     pub start: usize,
     pub ch: Option<u64>,
     pub fl: u32,
