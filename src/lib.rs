@@ -1,6 +1,10 @@
 //! rvt_core: hot core of the Revit file reader (own code; Python implementation in ~/rvt-research is the reference oracle).
 //! Stage 1: page stripping, gzip-member spans/inflate (parallel), element-header candidate scan.
+mod conv;
+mod dec;
 mod decoder;
+mod extract;
+mod g103;
 use flate2::read::DeflateDecoder;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -9,10 +13,10 @@ use std::io::Read;
 
 const PAGE_STORED: usize = 65_249;
 const PAGE_PAYLOAD: usize = 64_896;
-const GZ: [u8; 3] = [0x1f, 0x8b, 0x08];
+const GZ: [u8; 4] = [0x1f, 0x8b, 0x08, 0x00];
 
 /// Remove the 353-byte trailer after every FULL stored page (same rule as rvtfmt.strip_pages).
-fn strip_pages_impl(stored: &[u8]) -> Vec<u8> {
+pub fn strip_pages_impl(stored: &[u8]) -> Vec<u8> {
     let full = stored.len() / PAGE_STORED;
     if full == 0 {
         return stored.to_vec();
@@ -66,12 +70,11 @@ fn inflate_one(data: &[u8], sp: (usize, usize)) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// joined(stored): strip pages, inflate every member in parallel, concatenate. None if the layout is unexpected.
-#[pyfunction]
-fn joined<'py>(py: Python<'py>, stored: &[u8]) -> Option<Bound<'py, PyBytes>> {
+/// strip pages, inflate every member in parallel, concatenate. None if the layout is unexpected.
+pub fn joined_vec(stored: &[u8]) -> Option<Vec<u8>> {
     let data = strip_pages_impl(stored);
     let spans = member_spans(&data)?;
-    let outs: Vec<Option<Vec<u8>>> = py.allow_threads(|| spans.par_iter().map(|sp| inflate_one(&data, *sp)).collect());
+    let outs: Vec<Option<Vec<u8>>> = spans.par_iter().map(|sp| inflate_one(&data, *sp)).collect();
     let mut total = 0usize;
     for o in &outs {
         total += o.as_ref()?.len();
@@ -80,7 +83,20 @@ fn joined<'py>(py: Python<'py>, stored: &[u8]) -> Option<Bound<'py, PyBytes>> {
     for o in outs {
         buf.extend_from_slice(&o?);
     }
+    Some(buf)
+}
+
+/// joined(stored): strip pages, inflate every member in parallel, concatenate. None if the layout is unexpected.
+#[pyfunction]
+fn joined<'py>(py: Python<'py>, stored: &[u8]) -> Option<Bound<'py, PyBytes>> {
+    let buf = py.allow_threads(|| joined_vec(stored))?;
     Some(PyBytes::new_bound(py, &buf))
+}
+
+/// worker threads: RVT_THREADS, default min(6, cpus)
+fn init_pool() {
+    let n = std::env::var("RVT_THREADS").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).min(6)).max(1);
+    let _ = rayon::ThreadPoolBuilder::new().num_threads(n).build_global();
 }
 
 /// Positions i where chunk[i+4 .. i+4+W] (little endian, any alignment) is in the sorted id list; ascending, i in [0, n-24].
@@ -110,6 +126,7 @@ fn header_candidates(py: Python<'_>, chunk: &[u8], ids_sorted: Vec<u64>, w: usiz
 
 #[pymodule]
 fn rvt_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    init_pool();
     m.add_function(wrap_pyfunction!(strip_pages, m)?)?;
     m.add_function(wrap_pyfunction!(joined, m)?)?;
     m.add_function(wrap_pyfunction!(header_candidates, m)?)?;

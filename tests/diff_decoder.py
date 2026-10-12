@@ -1,7 +1,7 @@
 """Differential test of the Rust record decoder against rvt_decode.Dec (Python oracle): same dict (==), same end offset, same exception behaviour.
 usage: diff_decoder.py FILE... [--n N]"""
 import time, sys, os, random, struct, glob, collections
-sys.path.insert(0, '~/rvt-research'); os.environ['RVT_GEOM'] = '1'
+sys.path.insert(0, '~/rvt-research'); sys.path.insert(0, '~/src/rvt-core/python'); os.environ['RVT_GEOM'] = '1'
 import numpy as np, rvt_scan as S, rvt_decode as D, rvt2text as T, rvt_inventory as I
 import rvt_core as RC
 args = [a for a in sys.argv[1:] if not a.startswith('--')]
