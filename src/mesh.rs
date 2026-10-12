@@ -1331,18 +1331,15 @@ pub fn faces_in_bbox(kk: &K, geo: &Val, bb: (V3, V3), eps: f64, earcut: Earcut) 
         let f = ob(fc);
         if !is_dict(f) { continue; }
         let (_, ev) = match surface_eval(kk, dget(f, kk.k("m_pSurf")).unwrap_or(&Val::None))? { Some(x) => x, None => continue };
-        let (mut loops, _) = face_loops_uv(kk, handle_of(fc)?, &edges, None, false)?;
+        let (loops, _) = face_loops_uv(kk, handle_of(fc)?, &edges, None, false)?;
         if loops.is_empty() {
-            let cs = (|| -> Option<(UV, UV)> {
-                let fl_ = ob(dget(f, kk.k("m_pFirstLoop"))?);
-                let l = list(dget(dget(fl_, kk.k("m_Envelope"))?, kk.k("m_corners"))?).ok()?;
-                if l.len() != 2 { return None; }
-                Some((uv2(&l[0]).ok()?, uv2(&l[1]).ok()?))
-            })();
-            let (c0, c1) = match cs { Some(c) => c, None => continue };
-            let mut g = vec![];
-            for i in 0..9 { for j in 0..9 { g.push([c0[0] + (c1[0] - c0[0]) * i as f64 / 8.0, c0[1] + (c1[1] - c0[1]) * j as f64 / 8.0]); } }
-            loops = vec![g];
+            // no ordinary loop (edgeless / pole / trimmed faces): judge the face by its own tessellation
+            let tt = tessellate(kk, &[fc], &edges, earcut)?;
+            if tt.tris.is_empty() { continue; }
+            let mut mn = tt.tris[0][0]; let mut mx = tt.tris[0][0];
+            for t in &tt.tris { for p in t { for k in 0..3 { mn[k] = mn[k].min(p[k]); mx[k] = mx[k].max(p[k]); } } }
+            if (0..3).all(|k| mn[k] >= lo[k]) && (0..3).all(|k| mx[k] <= hi[k]) { keep.push(fc); }
+            continue;
         }
         let mut best = 0;
         let mut ba = f64::NEG_INFINITY;

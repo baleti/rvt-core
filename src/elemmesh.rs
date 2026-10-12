@@ -541,6 +541,24 @@ impl MeshDoc {
         match &*r { Ok(m) => self.to_py(py, m, false), Err(_) => Err(PyKeyError::new_err(format!("element_mesh({}) raised in the reference path", eid))) }
     }
 
+    /// test entry: rvt_mesh.element_faces_in_bbox(geos[gi], m_bBox, 0.02) of element eid -> (fidx, fprio, unsupported, faces)
+    #[pyo3(signature = (eid, gi, detail=3))]
+    fn faces_in_bbox_dbg(&self, py: Python<'_>, eid: u64, gi: usize, detail: i64) -> PyResult<(Vec<i64>, Vec<(i64, bool)>, Vec<&'static str>, i64, Vec<Tri>)> {
+        let ctx = self.ctx.clone();
+        let pp = self.py_.clone();
+        let r = py.allow_threads(move || -> Rs<(Vec<i64>, Vec<(i64, bool)>, Vec<&'static str>, i64, Vec<Tri>)> {
+            let ec = move |r: &[(&[UV], &[u32])]| earcut_py(&pp, r);
+            let kk = &ctx.kk;
+            let rr = ctx.rec(eid);
+            let fields = match &*rr { Ok(Some(f)) => f, _ => return Err(Raise) };
+            let (geos, _) = geos_f(kk, fields, detail);
+            let bb = bbox_of(dget(fields, kk.k("m_bBox")).ok_or(Raise)?)?;
+            let t = faces_in_bbox(kk, geos.get(gi).ok_or(Raise)?, bb, 0.02, &ec)?;
+            Ok((t.fidx, t.fprio, t.unsup, t.faces, t.tris))
+        });
+        r.map_err(|_| PyKeyError::new_err("raised"))
+    }
+
     /// element meshes of many elements in parallel -> list of (eid, dict | None on error) in input order.
     /// compact=True: tris as one (n,3,3) array, 'surf' (kind per triangle) instead of 'meta'
     #[pyo3(signature = (ids, symbol_depth=2, detail=3, compact=false))]

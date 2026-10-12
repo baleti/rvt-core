@@ -1,12 +1,13 @@
 #!/bin/bash
 # corpus differential suites for remote-host (h1run). usage: tests/h1_suite.sh SUITE...  suites: extract_all extract_default extract_slim g103 params mesh
-# logs: logs/h1_<suite>.log (appended, resumable: files that already have a result line are skipped); one python process per file inside its own
+# logs: $HOME/h1logs/rvt-core/h1_<suite>.log (outside the h1run-synced tree: any agent's `h1run sync` would overwrite them; pull with h1run pull h1logs/rvt-core) (appended, resumable: files that already have a result line are skipped); one python process per file inside its own
 # scope (MemoryMax 6G, same slice) so one heavy file or a neighbour's memory cannot kill the whole suite; a killed file is logged as "FAILED rc".
 # uses a snapshot of the released build; oracle side single worker (memory-light)
 cd "$(dirname "$0")/.."
 SNAP=$(mktemp -d /tmp/rvtfast.XXXXXX); cp python/rvt_fast.py python/rvt_core.abi3.so "$SNAP"/
 export RVT_FAST_DIR="$SNAP" RVT_CORE_NOCACHE=1 RVT_WORKERS=1 RVT_THREADS=4
 PY=${PY:-python}
+L=$HOME/h1logs/rvt-core; mkdir -p $L
 ALL=$(ls -Sr $HOME/rvt-research/corpus/*/*)
 SUB=$(ls -Sr $HOME/rvt-research/corpus/*/* | awk 'NR % 3 == 1')
 run1() {  # suite log file args...
@@ -17,7 +18,7 @@ run1() {  # suite log file args...
   return 0
 }
 for s in "$@"; do
-  log=logs/h1_$s.log
+  log=$L/h1_$s.log
   case $s in
     extract_all) for f in $ALL; do run1 $log $f tests/diff_extract.py --want-all; done ;;
     extract_default) for f in $SUB; do run1 $log $f tests/diff_extract.py --default; done ;;
@@ -27,5 +28,5 @@ for s in "$@"; do
     mesh) for f in $SUB; do run1 $log $f tests/diff_mesh.py --impl rust --n 300; done ;;
   esac
   ok=$(grep -cE 'IDENTICAL$|  OK$' $log); fl=$(grep -cE 'FAILED rc|^FAIL ' $log); n=$(grep -cvE '^  ' $log)
-  echo "$s done $(date +%H:%M): $ok ok, $fl failed, $((n - ok - fl)) DIFFERENT" >> logs/h1_summary.log
+  echo "$s done $(date +%H:%M): $ok ok, $fl failed, $((n - ok - fl)) DIFFERENT" >> $L/h1_summary.log
 done

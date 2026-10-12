@@ -36,6 +36,15 @@ pub fn strip_pages_impl(stored: &[u8]) -> Vec<u8> {
     out
 }
 
+/// test entry: rvt_mesh.select_closed_shell(tris, meta=planes, fidx, prio) -> (kept fidx or None, closed)
+#[pyfunction]
+fn select_closed_shell_dbg(tris: Vec<[[f64; 3]; 3]>, fidx: Vec<i64>, prio: std::collections::HashMap<i64, bool>) -> (Option<Vec<i64>>, bool) {
+    let meta: Vec<mesh::Meta> = tris.iter().map(|_| mesh::Meta { kind: "plane", ev: mesh::MetaEv::None, uv: None }).collect();
+    let pr: rustc_hash::FxHashMap<i64, bool> = prio.into_iter().collect();
+    let (_, _, ok, lf) = mesh::select_closed_shell(&tris, &meta, &fidx, Some(&pr));
+    (lf, ok)
+}
+
 #[pyfunction]
 fn strip_pages<'py>(py: Python<'py>, stored: &[u8]) -> Bound<'py, PyBytes> {
     PyBytes::new_bound(py, &strip_pages_impl(stored))
@@ -134,6 +143,7 @@ fn header_candidates(py: Python<'_>, chunk: &[u8], ids_sorted: Vec<u64>, w: usiz
 fn rvt_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     init_pool();
     m.add_function(wrap_pyfunction!(strip_pages, m)?)?;
+    m.add_function(wrap_pyfunction!(select_closed_shell_dbg, m)?)?;
     m.add_function(wrap_pyfunction!(joined, m)?)?;
     m.add_function(wrap_pyfunction!(header_candidates, m)?)?;
     m.add_class::<decoder::RecDecoder>()?;
