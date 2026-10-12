@@ -76,6 +76,7 @@ impl Conv {
                 o.into_py(py)
             }
             Val::Geo => self.geo.clone_ref(py).into_any(),
+            Val::R(..) => return Err(pyo3::exceptions::PyRuntimeError::new_err("lazy string reached the converter")),
         })
     }
 

@@ -143,6 +143,8 @@ pub enum Val {
     Slot(u32),
     /// the string '<geometry not decoded>'
     Geo,
+    /// undecoded UTF-16LE string (byte offset, chars): only produced with Dec.lazy_str (extensible-storage scan)
+    R(usize, usize),
 }
 
 impl Val {
@@ -208,6 +210,19 @@ pub fn struct_err(size: usize, off: usize, len: usize) -> DErr {
     DErr::Other(format!("unpack_from requires a buffer of at least {} bytes for unpacking {} bytes at offset {} (actual buffer size is {})", off + size, size, off, len))
 }
 
+/// bytes.decode('utf-16le', 'replace'): ASCII fast path, general lossy decoding otherwise
+pub fn utf16le(b: &[u8]) -> String {
+    let mut v: Vec<u8> = Vec::with_capacity(b.len() / 2);
+    let mut ascii = true;
+    for c in b.chunks_exact(2) {
+        if c[1] != 0 || c[0] >= 0x80 { ascii = false; break; }
+        v.push(c[0]);
+    }
+    if ascii { return unsafe { String::from_utf8_unchecked(v) }; }
+    let u: Vec<u16> = b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    String::from_utf16_lossy(&u)
+}
+
 fn hex(b: &[u8]) -> String {
     const H: &[u8; 16] = b"0123456789abcdef";
     let mut s = String::with_capacity(b.len() * 2);
@@ -251,6 +266,9 @@ pub struct Dec<'s> {
     path: Vec<PathEl>,
     slots: Vec<Slot>,
     pub strcap: usize,
+    /// skip building desync messages (callers that discard them; extract re-decodes accepted records with messages)
+    pub quiet: bool,
+    pub lazy_str: bool,
 }
 
 impl<'s> Dec<'s> {
@@ -258,10 +276,11 @@ impl<'s> Dec<'s> {
         let mut defined = FxHashSet::default();
         defined.insert(1);
         defined.insert(2);
-        Dec { s, defined, visited: vec![], err: None, path: vec![], slots: vec![], strcap: s.strcap }
+        Dec { s, defined, visited: vec![], err: None, path: vec![], slots: vec![], strcap: s.strcap, quiet: false, lazy_str: false }
     }
 
     fn path_str(&self) -> String {
+        if self.quiet { return String::new(); }
         let mut parts: Vec<String> = vec![];
         for e in &self.path {
             match *e {
@@ -292,8 +311,8 @@ impl<'s> Dec<'s> {
         if kind == 8 {
             let n = self.u32at(b, p)? as usize;
             if n > self.strcap || p + 4 + 2 * n > b.len() { return Err(DErr::Desync(format!("string length {} at {}", n, p))); }
-            let u: Vec<u16> = b[p + 4..p + 4 + 2 * n].chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
-            return Ok((Val::S(String::from_utf16_lossy(&u)), p + 4 + 2 * n));
+            if self.lazy_str { return Ok((Val::R(p + 4, n), p + 4 + 2 * n)); }
+            return Ok((Val::S(utf16le(&b[p + 4..p + 4 + 2 * n])), p + 4 + 2 * n));
         }
         let sz = match kind { 1 | 2 => 1, 3 | 0x0a => 2, 4 | 5 | 6 => 4, 7 | 0x0b => 8, _ => return Err(DErr::Desync(format!("unknown kind {:#x}", kind))) };
         if p + sz > b.len() { return Err(DErr::Desync("past end".into())); }
@@ -516,7 +535,7 @@ impl<'s> Dec<'s> {
                 match r {
                     Ok((v, np)) => { dict_set(out, f.key, v, dup); p = np; }
                     Err(DErr::Desync(m)) => {
-                        if !m.contains("@@") {
+                        if !self.quiet && !m.contains("@@") {
                             let tail = hex_sp(slice(b, p, p + 24));
                             return Err(DErr::Desync(format!("{} @@ {}.{} T={:#x} at {}: {}", m, cls.name, f.name, f.t0, p, tail)));
                         }

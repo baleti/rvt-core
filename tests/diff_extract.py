@@ -22,7 +22,7 @@ def digest_side(side, f):
         os.environ['RVT_NOFAST'] = '1'; os.environ['RVT_WORKERS'] = ow
         import rvt_entities as E; fn = E.extract
     else:
-        sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'python')); import rvt_fast as RF; fn = RF.extract
+        sys.path.insert(0, os.environ.get('RVT_FAST_DIR') or os.path.join(os.path.dirname(HERE), 'python')); import rvt_fast as RF; fn = RF.extract
     kw = {'want_all': True} if mode == 'want_all' else ({'want_all': True, 'slim': lambda c: c == 'WallSweep'} if mode == 'slim' else {})
     t = time.time(); x = fn(f, **kw); dt = time.time() - t
     rd = {}

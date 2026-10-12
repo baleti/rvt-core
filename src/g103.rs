@@ -17,20 +17,16 @@ fn inflate(data: &[u8]) -> Option<(Vec<u8>, usize, bool)> {
     let mut d = Decompress::new(false);
     let mut out: Vec<u8> = Vec::with_capacity((data.len() * 4).min(1 << 18).max(1024));
     loop {
-        let before_in = d.total_in() as usize;
+        let in0 = d.total_in() as usize;
+        let out0 = out.len();
         if out.len() == out.capacity() { out.reserve(out.capacity().max(1 << 16)); }
-        let st = d.decompress_vec(&data[before_in..], &mut out, FlushDecompress::None).ok()?;
+        let st = d.decompress_vec(&data[in0..], &mut out, FlushDecompress::None).ok()?;
         let used = d.total_in() as usize;
-        match st {
-            Status::StreamEnd => { out.shrink_to_fit(); return Some((out, used, true)); }
-            _ => {
-                if used >= data.len() && out.len() < out.capacity() { out.shrink_to_fit(); return Some((out, used, false)); }
-                if used == before_in && out.len() < out.capacity() {
-                    // no progress with room left: input exhausted (truncated stream)
-                    out.shrink_to_fit();
-                    return Some((out, used, false));
-                }
-            }
+        if st == Status::StreamEnd { out.shrink_to_fit(); return Some((out, used, true)); }
+        if used == in0 && out.len() == out0 {
+            // no progress at all: input exhausted (truncated stream)
+            out.shrink_to_fit();
+            return Some((out, used, false));
         }
     }
 }
@@ -80,7 +76,10 @@ fn members_par(data: &[u8]) -> Option<Vec<Member>> {
         .par_iter()
         .map(|&(a, e)| match inflate(&data[a + 10..e]) {
             Some((o, used, true)) if used + 8 >= e - a - 10 => Some((o, a + 10 + used)),
-            _ => None,
+            r => {
+                if std::env::var("RVT_CORE_TIMING").is_ok() { eprintln!("rvt_core g103: span {}..{} inflate -> {:?}", a, e, r.as_ref().map(|x| (x.0.len(), x.1, x.2))); }
+                None
+            }
         })
         .collect();
     let mut res = Vec::with_capacity(spans.len());
@@ -135,6 +134,7 @@ pub struct Entry {
 /// chain of records in one group (build_index inner loop); records are kept whole (caller picks fields)
 pub fn chain(s: &Schema, buf: &[u8]) -> Vec<Entry> {
     let mut d = Dec::new(s);
+    d.quiet = true;
     let mut out = vec![];
     let mut p = 0usize;
     while (p as i64) < buf.len() as i64 - 30 {

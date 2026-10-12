@@ -37,6 +37,35 @@ def make_recdecoder(sch, W, es=None):
     if es: rd.set_es(es)
     return rd
 
+def find_schemas(d, sch, W, rd=None):
+    """== rvt_es.find_schemas(d, sch, W)"""
+    RC = _rc()
+    if RC is None:
+        import rvt_es as ES; return ES.find_schemas(d, sch, W)
+    if 'ESSchema' not in sch.by: return {}
+    rd = rd or make_recdecoder(sch, W)
+    return rd.es_find_schemas(bytes(d))
+
+def es_load(path):
+    """== rvt_es.load(path) -> (schemas, sch); same cache (~/.cache/rvt-schema/es-<sha1 of Global/Latest>.pkl, honours RVT_NOCACHE)"""
+    import olefile, fmt_parser as fp, hashlib, pickle, rvt_decode as D, rvt_scan as S
+    from rvtfmt import inflate_stream
+    o = olefile.OleFileIO(path); cls, _ = fp.parse(inflate_stream(o.openstream('Formats/Latest').read())[1]); sch = D.Schema(cls); W = S.id_size(cls)
+    pre, d, un = inflate_stream(o.openstream('Global/Latest').read())
+    cd = os.path.expanduser('~/.cache/rvt-schema'); fn = os.path.join(cd, 'es-' + hashlib.sha1(bytes(d)).hexdigest() + '.pkl')
+    if not os.environ.get('RVT_NOCACHE'):
+        try:
+            with open(fn, 'rb') as fh: return pickle.load(fh), sch
+        except Exception: pass
+    r = find_schemas(d, sch, W)
+    if os.environ.get('RVT_NOCACHE'): return r, sch
+    try:
+        os.makedirs(cd, exist_ok=True); tmp = fn + '.%d.tmp' % os.getpid()
+        with open(tmp, 'wb') as fh: pickle.dump(r, fh, protocol=5)
+        os.replace(tmp, fn)
+    except Exception: pass
+    return r, sch
+
 def extract(path, extra=(), only_ids=None, want_all=False, slim=None):
     """== rvt_entities.extract (same arguments, same result)"""
     import rvt_entities as E
@@ -48,7 +77,7 @@ def extract(path, extra=(), only_ids=None, want_all=False, slim=None):
     EH = sch.by.get('ElementHeader', -999) + 12; names = {i + 12: c['name'] for i, c in enumerate(cls)}; et = I.element_tags(cls)
     wanted = {t for t, n in names.items() if t in et and (n in E.WANT or n.startswith(E.WANT_PREFIX)) and n != 'DBView'}
     if extra or want_all: wanted = {t for t, n in names.items() if t in et and (want_all or n in extra)}
-    try: es = ES.load(path)[0]
+    try: es = es_load(path)[0]
     except Exception: es = {}
     rd = make_recdecoder(sch, W, es); rd.set_ids(sorted(ids))
     slim_tags = sorted(t for t in wanted if slim is not None and not slim(names[t])) if slim is not None else None
@@ -78,7 +107,7 @@ class G103:
     def __init__(s, f):
         import olefile, rvt_scan as S, rvt_decode as D, rvt_es as ES
         o, cls, ids = S.load(f); W = S.id_size(cls); sch = D.Schema(cls)
-        try: es = ES.load(f)[0]
+        try: es = es_load(f)[0]
         except Exception: es = {}
         s.f = f; s.W = W; s.sch = sch; s.rd = make_recdecoder(sch, W, es); s.index = {}
         import gc

@@ -10,7 +10,7 @@ def side(which, f):
     if which == 'oracle':
         os.environ['RVT_NOFAST'] = '1'; import g103_get as G; t = time.time(); idx = G.build_index(f); dt = time.time() - t; ole, dec = G.load_dec(f); get = lambda i: G.get_record(f, i, ole, dec)
     else:
-        sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'python')); import rvt_fast as RF; t = time.time(); idx = RF.build_index(f); dt = time.time() - t; get = lambda i: RF.get_record(f, i)
+        sys.path.insert(0, os.environ.get('RVT_FAST_DIR') or os.path.join(os.path.dirname(HERE), 'python')); import rvt_fast as RF; t = time.time(); idx = RF.build_index(f); dt = time.time() - t; get = lambda i: RF.get_record(f, i)
     dig = {}
     for k, v in idx.items():
         o = []; canon(v, o); dig[repr(k)] = hashlib.sha1(''.join(o).encode()).hexdigest()[:16]

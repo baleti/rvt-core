@@ -112,6 +112,7 @@ fn m_id_eq(s: &Schema, r: &Rec, eid: u64) -> bool {
 pub fn decode_variant(dec: &mut Dec, chunk: &[u8], i: usize, short: bool, tag: u32, eid: u64, p: &Params) -> Out {
     let kind = p.kinds.get(tag as usize).copied().unwrap_or(TagKind::Other);
     if kind == TagKind::Other { return Out::Skip; }
+    dec.quiet = true;
     let r = match dec.record(chunk, i, short) {
         Ok((r, _)) => r,
         Err(_) => return Out::Reject,
@@ -120,6 +121,12 @@ pub fn decode_variant(dec: &mut Dec, chunk: &[u8], i: usize, short: bool, tag: u
         TagKind::Wanted => {
             if m_id_eq(dec.s, &r, eid) && r.id == eid {
                 let mut r = r;
+                if r.error.is_some() && p.full[tag as usize] {
+                    // the record keeps its error message: decode again with messages
+                    dec.quiet = false;
+                    if let Ok((r2, _)) = dec.record(chunk, i, short) { r = r2; }
+                    dec.quiet = true;
+                }
                 if !p.full[tag as usize] {
                     r.fields = Val::D(vec![]);
                     r.slots = vec![];

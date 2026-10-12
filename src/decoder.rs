@@ -156,6 +156,15 @@ impl RecDecoder {
         }
     }
 
+    /// rvt_es.find_schemas(d, sch, W) on the inflated Global/Latest stream -> {guid_hex: schema dict}
+    fn es_find_schemas<'py>(&self, py: Python<'py>, d: &[u8]) -> PyResult<Bound<'py, PyDict>> {
+        let s = self.schema.clone();
+        let found = py.allow_threads(|| crate::es::find_schemas(&s, d));
+        let out = PyDict::new_bound(py);
+        for f in found { out.set_item(&f.guid, self.conv.val(py, &f.sc, &f.slots)?)?; }
+        Ok(out)
+    }
+
     /// ElemTable ids (sorted) used by extract_chunk
     fn set_ids(&mut self, ids: Vec<u64>) {
         let set = IdSet::new(&ids);
