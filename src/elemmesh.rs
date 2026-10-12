@@ -275,7 +275,7 @@ impl Ctx {
             fid.extend(std::iter::repeat(10_000_000).take(pm.len()));
             fid.extend(xf.iter().map(|f| 20_000_000 + f));
             let mut nid: Vec<i64> = if ownn.len() == own.len() { ownn } else { vec![0; own.len()] };
-            nid.extend(std::iter::repeat(1_000_000).take(pm.len()));
+            nid.extend(std::iter::repeat(1_000_000_000).take(pm.len()));
             nid.extend(xn.iter().map(|n| 20_000_000 + n));
             let mut meta = ownm;
             meta.extend(std::iter::repeat(Meta { kind: "plane", ev: MetaEv::None, uv: None }).take(pm.len()));

@@ -416,7 +416,7 @@ def _params_impl(path, x):
             if isinstance(v0, (int, float)): d.setdefault(k, float(v0))
         if c in ('RbsPipeCurve', 'RbsDuctCurve', 'RbsConduitCurve', 'CableTray'): d.update(Gm.mep_curve(f, c, lv))
         elif c == 'FamilyInstance': d.update(Gm.fam_instance(f, lv))
-        elif c == 'SWall' or c.endswith('CenterLine'):
+        elif c == 'SWall' or c.endswith('CenterLine') or c == 'CurveElem' or c.startswith('AnalyticalModel'):
             cu = Gm.primary_curve(f)
             if cu is not None and Gm.curve_length(cu) is not None: d['Length'] = Gm.curve_length(cu)
         hf = x['eh'].get(eid) or {}

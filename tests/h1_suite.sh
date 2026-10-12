@@ -1,20 +1,31 @@
 #!/bin/bash
-# corpus differential suites for remote-host (h1run). usage: tests/h1_suite.sh SUITE...  suites: extract_all_rest extract_default extract_slim g103 params mesh
-# logs: logs/h1_<suite>.log ; uses a snapshot of the released build; oracle side single worker (memory-light)
+# corpus differential suites for remote-host (h1run). usage: tests/h1_suite.sh SUITE...  suites: extract_all extract_default extract_slim g103 params mesh
+# logs: logs/h1_<suite>.log (appended, resumable: files that already have a result line are skipped); one python process per file inside its own
+# scope (MemoryMax 6G, same slice) so one heavy file or a neighbour's memory cannot kill the whole suite; a killed file is logged as "FAILED rc".
+# uses a snapshot of the released build; oracle side single worker (memory-light)
 cd "$(dirname "$0")/.."
 SNAP=$(mktemp -d /tmp/rvtfast.XXXXXX); cp python/rvt_fast.py python/rvt_core.abi3.so "$SNAP"/
 export RVT_FAST_DIR="$SNAP" RVT_CORE_NOCACHE=1 RVT_WORKERS=1 RVT_THREADS=4
 PY=${PY:-python}
 ALL=$(ls -Sr $HOME/rvt-research/corpus/*/*)
 SUB=$(ls -Sr $HOME/rvt-research/corpus/*/* | awk 'NR % 3 == 1')
+run1() {  # suite log file args...
+  local log=$1 f=$2; shift 2
+  grep -q "^$(basename "$f" | cut -c1-40)" "$log" 2>/dev/null && return 0
+  systemd-run --user --scope --quiet --slice=rvt-offload.slice -p MemoryMax=6G -p MemorySwapMax=0 $PY "$@" "$f" >> "$log" 2>> "$log.err"
+  local rc=$?; [ $rc -gt 1 ] && printf '%-48s FAILED rc=%d\n' "$(basename "$f" | cut -c1-48)" $rc >> "$log"
+  return 0
+}
 for s in "$@"; do
+  log=logs/h1_$s.log
   case $s in
-    extract_all_rest) REST=$(for f in $ALL; do grep -q "^$(basename $f | cut -c1-50) " logs/extract_all.remote-host.log || echo $f; done); $PY tests/diff_extract.py --want-all $REST ;;
-    extract_default) $PY tests/diff_extract.py --default $SUB ;;
-    extract_slim) $PY tests/diff_extract.py --slim $SUB ;;
-    g103) $PY tests/diff_g103.py $ALL ;;
-    params) $PY tests/diff_params.py $ALL ;;
-    mesh) $PY tests/diff_mesh.py --impl rust --n 300 $SUB ;;
-  esac > logs/h1_$s.log 2>&1
-  echo "$s exit $? $(date +%H:%M)" >> logs/h1_summary.log
+    extract_all) for f in $ALL; do run1 $log $f tests/diff_extract.py --want-all; done ;;
+    extract_default) for f in $SUB; do run1 $log $f tests/diff_extract.py --default; done ;;
+    extract_slim) for f in $SUB; do run1 $log $f tests/diff_extract.py --slim; done ;;
+    g103) for f in $ALL; do run1 $log $f tests/diff_g103.py; done ;;
+    params) for f in $ALL; do run1 $log $f tests/diff_params.py; done ;;
+    mesh) for f in $SUB; do run1 $log $f tests/diff_mesh.py --impl rust --n 300; done ;;
+  esac
+  ok=$(grep -cE 'IDENTICAL$|  OK$' $log); fl=$(grep -cE 'FAILED rc|^FAIL ' $log); n=$(grep -cvE '^  ' $log)
+  echo "$s done $(date +%H:%M): $ok ok, $fl failed, $((n - ok - fl)) DIFFERENT" >> logs/h1_summary.log
 done
