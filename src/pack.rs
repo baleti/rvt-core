@@ -77,7 +77,7 @@ impl<'a> R<'a> {
                 for _ in 0..nd { shape.push(u64::from_le_bytes(self.take(8)?.try_into().unwrap())); }
                 let n = u64::from_le_bytes(self.take(8)?.try_into().unwrap()) as usize;
                 let raw = self.take(n)?;
-                let a = np.getattr("frombuffer")?.call1((PyBytes::new_bound(py, raw), dt))?.call_method0("copy")?;
+                let a = np.getattr("frombuffer")?.call1((pyo3::types::PyByteArray::new_bound(py, raw), dt))?;   // writable, one copy
                 a.call_method1("reshape", (PyTuple::new_bound(py, shape),))?.unbind()
             }
             _ => return Err(PyValueError::new_err(format!("bad pack tag {}", t))),

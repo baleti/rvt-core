@@ -75,21 +75,28 @@ def extract(path, extra=(), only_ids=None, want_all=False, slim=None):
     """== rvt_entities.extract (same arguments, same result)"""
     import rvt_entities as E
     if not on(): return E.extract(path, extra=extra, only_ids=only_ids, want_all=want_all, slim=slim)
-    import rvt_scan as S, rvt_decode as D, rvt2text as T, rvt_inventory as I, rvt_es as ES
+    return _extract(path, extra, only_ids, want_all, slim)
+
+def extract_two_stage(path, slim):
+    """(x_slim, finish): x_slim == extract(path, want_all=True, slim=slim) now; finish() -> extract(path, want_all=True), converted from the same decode
+    (no second inflate/decode). The binary cache is written in the full variant."""
+    return _extract(path, (), None, True, slim, two_stage=True)
+
+def _extract(path, extra, only_ids, want_all, slim, two_stage=False):
+    import rvt_entities as E, rvt_scan as S, rvt_decode as D, rvt2text as T, rvt_inventory as I
+    import gc, json, hashlib
     o, cls, ids = S.load(path); W = S.id_size(cls); sch = D.Schema(cls)
     EH = sch.by.get('ElementHeader', -999) + 12; names = {i + 12: c['name'] for i, c in enumerate(cls)}; et = I.element_tags(cls)
     wanted = {t for t, n in names.items() if t in et and (n in E.WANT or n.startswith(E.WANT_PREFIX)) and n != 'DBView'}
     if extra or want_all: wanted = {t for t, n in names.items() if t in et and (want_all or n in extra)}
-    try: es = es_load(path)[0]
-    except Exception: es = {}
     slim_tags = sorted(t for t in wanted if slim is not None and not slim(names[t])) if slim is not None else None
     oid = sorted(only_ids) if only_ids is not None else None
     wl = sorted(wanted)
-    import gc, json, hashlib
+    cache_slim = None if two_stage else slim_tags                 # two-stage: the cache holds the full variant
     cfn = hdr = None
-    if only_ids is None and not os.environ.get('RVT_NOCACHE') and not os.environ.get('RVT_CORE_NOCACHE'):
+    if only_ids is None and _cache_on():
         hdr = json.dumps({'reader': reader_version(), 'schema': hashlib.sha1(o.openstream('Formats/Latest').read()).hexdigest(), 'file': file_key(path), 'W': W})
-        cfn = os.path.join(CACHE, '%s-x%s.rvtc' % (file_key(path), hashlib.sha1(repr((wl, EH, slim_tags)).encode()).hexdigest()[:10]))
+        cfn = os.path.join(CACHE, '%s-x%s.rvtc' % (file_key(path), hashlib.sha1(repr((wl, EH, cache_slim)).encode()).hexdigest()[:10]))
         h = _rc().RecDecoder.cache_header(cfn)
         if h is not None:
             try: user = json.loads(h)['user']
@@ -101,11 +108,14 @@ def extract(path, extra=(), only_ids=None, want_all=False, slim=None):
                 except Exception: got = None
                 finally:
                     if gc_was: gc.enable()
-                if got is not None: return dict(eh=got[1], recs=got[0], W=W, sch=sch)
+                if got is not None:
+                    x = dict(eh=got[1], recs=got[0], W=W, sch=sch)
+                    return (x, lambda: x) if two_stage else x
     try: es = es_load(path)[0]
     except Exception: es = {}
     rd = make_recdecoder(sch, W, es); rd.set_ids(sorted(ids))
     if cfn: rd.cache_begin()
+    if two_stage: rd.keep_begin()
     recs = {}; eh = {}
     gc_was = gc.isenabled(); gc.disable()                   # millions of new container objects: cyclic GC passes would cost more than the decoding
     try:
@@ -115,7 +125,19 @@ def extract(path, extra=(), only_ids=None, want_all=False, slim=None):
     if cfn and ok:
         try: os.makedirs(CACHE, exist_ok=True); rd.cache_write(cfn, hdr)
         except Exception: pass
-    return dict(eh=eh, recs=recs, W=W, sch=sch)
+    x = dict(eh=eh, recs=recs, W=W, sch=sch)
+    if not two_stage: return x
+    def finish():
+        r2 = {}; e2 = {}
+        gc_was = gc.isenabled(); gc.disable()
+        try:
+            for lr, le in rd.take_kept():
+                for k, r in lr: r2.setdefault(k, r)
+                for k, v in le: e2.setdefault(k, v)
+        finally:
+            if gc_was: gc.enable()
+        return dict(eh=e2, recs=r2, W=W, sch=sch)
+    return x, finish
 
 _RV = {}
 def reader_version():
@@ -468,13 +490,23 @@ class Model:
     Results are cached in ~/.cache/rvt-core (binary, keyed by file + reader/mesh/params code versions + schema)."""
     def __init__(s, path, progress=True):
         s.path = os.path.abspath(path); s.key = file_key(path); s.prog = Progress(path) if progress else None
-        s._x = None; s._doc = None; s._cen = None; s._mc = None
+        s._x = None; s._doc = None; s._cen = None; s._mc = None; s._finish = None
         import threading; s._lock = threading.Lock()
     def _set(s, stage=None, **kw):
         if s.prog: s.prog.set(stage, **kw)
     def quick(s):
+        """element table + levels + grids; decodes the file once (the same extraction full() returns)"""
+        import rvt_decode as D
         s._set('quick', total=1)
-        x = extract(s.path, want_all=True, slim=lambda c: c in QUICK_FULL)
+        fn = os.path.join(CACHE, '%s-q%s.pk' % (s.key, params_version()))
+        if _cache_on() and os.path.exists(fn) and s._x is None:
+            try:
+                q = _rc().unpack(fn, D.EID)
+                q['elements'] = {int(k): v for k, v in q['elements'].items()}
+                s._set(done=1, elements_decoded=len(q['elements'])); return q
+            except Exception: pass
+        if s._x is not None: x = s._x
+        else: x, s._finish = extract_two_stage(s.path, slim=lambda c: c in QUICK_FULL)
         s._cen = _census_of(x)
         W = x['W']; els = {}
         for (eid, c), r in x['recs'].items():
@@ -495,12 +527,19 @@ class Model:
                 levels.append({'id': eid, 'name': f.get('m_text', ''), 'elevation_ft': z})
             elif c == 'Grid': grids.append({'id': eid, 'name': f.get('m_text', '')})
         levels.sort(key=lambda l: (l['elevation_ft'] is None, l['elevation_ft']))
+        q = {'elements': els, 'levels': levels, 'grids': grids, 'W': W}
+        if _cache_on():
+            try: os.makedirs(CACHE, exist_ok=True); tmp = fn + '.%d.tmp' % os.getpid(); open(tmp, 'wb').write(_rc().pack(q, D.EID)); os.replace(tmp, fn)
+            except Exception: pass
         s._set(done=1, elements_decoded=len(els))
-        return {'elements': els, 'levels': levels, 'grids': grids, 'W': W}
+        return q
     def full(s):
         import rvt_decode as D
         s._set('extract', total=1)
-        x = s._x = extract(s.path, want_all=True)
+        if s._x is None:
+            fin = getattr(s, '_finish', None); s._finish = None
+            s._x = fin() if fin else extract(s.path, want_all=True)
+        x = s._x
         s._set(done=1, elements_decoded=len(x['recs']))
         s._set('params', total=1)
         fn = os.path.join(CACHE, '%s-p%s.pk' % (s.key, params_version()))
@@ -519,7 +558,8 @@ class Model:
         with s._lock:
             if s._doc is None:
                 d = Doc(s.path)
-                cen = s._cen if s._cen is not None else (_census_of(s._x) if s._x is not None else None)
+                if s._cen is None and s._x is not None: s._cen = _census_of(s._x)
+                cen = s._cen
                 if cen is not None: d._cen = cen
                 s._doc = d
             return s._doc
@@ -544,8 +584,17 @@ class Model:
         """synchronous form of start_meshes"""
         yield from s.start_meshes(ids, chunk, compact)
     def mesh_ids(s):
-        """elements the viewer meshes: channel-103 record with a bbox, class not a symbol/type"""
+        """elements the viewer meshes: channel-103 record with a bbox, class not a symbol/type (cached with the meshes)"""
+        import rvt_decode as D
+        fn = os.path.join(CACHE, '%s-i%s.pk' % (s.key, mesh_version()))
+        if _cache_on() and os.path.exists(fn):
+            try: return list(_rc().unpack(fn, D.EID))
+            except Exception: pass
         d = s.doc(); cen = d._census()
-        return [e for e, i in d.res.items() if i.get('bbox') and cen['cls'].get(e) and not cen['cls'][e].endswith('Symbol')]
+        ids = [e for e, i in d.res.items() if i.get('bbox') and cen['cls'].get(e) and not cen['cls'][e].endswith('Symbol')]
+        if _cache_on():
+            try: os.makedirs(CACHE, exist_ok=True); tmp = fn + '.%d.tmp' % os.getpid(); open(tmp, 'wb').write(_rc().pack(ids, D.EID)); os.replace(tmp, fn)
+            except Exception: pass
+        return ids
     def close(s):
         if s.prog: s.prog.close()

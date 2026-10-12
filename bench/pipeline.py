@@ -11,7 +11,7 @@ import os, sys, time, json, glob, hashlib
 mode, f = sys.argv[1], sys.argv[2]
 N = int(sys.argv[sys.argv.index('--sample') + 1]) if '--sample' in sys.argv else 300
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, '..', 'python'))
+sys.path.insert(0, os.environ.get('RVT_FAST_DIR') or os.path.join(HERE, '..', 'python'))
 T = {}
 
 def es_cache_file(path):

@@ -23,6 +23,8 @@ pub struct RecDecoder {
     /// binary-cache sink: serialised partition blocks of extract_* calls while active
     sink: Option<Vec<u8>>,
     writer: Option<std::thread::JoinHandle<std::io::Result<()>>>,
+    /// two-stage extraction: full decoded results kept per partition until take_kept()
+    kept: Option<Vec<(Vec<((u64, u32), crate::dec::Rec)>, Vec<(u64, crate::dec::Rec)>)>>,
 }
 
 pub fn classes_from_py(classes: &Bound<'_, PyList>) -> PyResult<Vec<Class>> {
@@ -88,7 +90,7 @@ impl RecDecoder {
     fn new(py: Python<'_>, classes: &Bound<'_, PyList>, idsize: usize, stop: Vec<String>, strcap: usize, eid_type: Py<PyAny>, desync_type: Py<PyAny>) -> PyResult<Self> {
         let s = Schema::new(classes_from_py(classes)?, idsize, &stop, strcap);
         let conv = Conv::new(py, &s, eid_type);
-        Ok(RecDecoder { schema: Arc::new(s), conv, desync_type, strcap, ids: None, g103: Default::default(), g103_idx: Default::default(), sink: None, writer: None })
+        Ok(RecDecoder { schema: Arc::new(s), conv, desync_type, strcap, ids: None, g103: Default::default(), g103_idx: Default::default(), sink: None, writer: None, kept: None })
     }
 
     /// es_schemas: {guid_hex: {'m_fields': [{'m_entryIndex','m_containerType','m_fieldTypeName','m_fieldName'}]}}
@@ -181,6 +183,26 @@ impl RecDecoder {
         let ctx = crate::elemmesh::Ctx::new(self.schema.clone(), self.g103_idx.clone(), c, w);
         let conv = Conv::new(py, &self.schema, self.conv.eid.clone_ref(py));
         crate::elemmesh::MeshDoc::new(py, ctx, conv)
+    }
+
+    /// keep the full decoded results of the following extract_* calls (their returned view may be slim)
+    fn keep_begin(&mut self) { self.kept = Some(vec![]); }
+
+    /// the kept results converted in full: [(records, headers)] per extract call, same form as extract_chunk returns
+    fn take_kept<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+        let kept = self.kept.take().ok_or_else(|| PyValueError::new_err("keep_begin first"))?;
+        let out = PyList::empty_bound(py);
+        for (recs, ehs) in kept.iter() {
+            let lr = PyList::empty_bound(py);
+            for ((eid, ct), r) in recs.iter() {
+                let key = PyTuple::new_bound(py, [eid.into_py(py), self.conv.cname(py, *ct)]);
+                lr.append(PyTuple::new_bound(py, [key.into_py(py), self.conv.rec(py, r)?.into_py(py)]))?;
+            }
+            let le = PyList::empty_bound(py);
+            for (eid, r) in ehs.iter() { le.append(PyTuple::new_bound(py, [eid.into_py(py), self.conv.val(py, &r.fields, &r.slots)?]))?; }
+            out.append(PyTuple::new_bound(py, [lr.into_py(py), le.into_py(py)]))?;
+        }
+        Ok(out)
     }
 
     /// start collecting extraction results for the binary cache
@@ -296,6 +318,7 @@ impl RecDecoder {
 
 impl RecDecoder {
     fn extract_impl<'py>(&mut self, py: Python<'py>, chunk: &[u8], wanted: Vec<u32>, eh_tag: i64, only_ids: Option<Vec<u64>>, slim: Option<Vec<u32>>) -> PyResult<Bound<'py, PyTuple>> {
+        let keep = self.kept.is_some();
         let s = self.schema.clone();
         let (_, ids) = self.ids.as_ref().ok_or_else(|| PyValueError::new_err("set_ids first"))?;
         let mut kinds = vec![TagKind::Other; 65536];
@@ -304,10 +327,12 @@ impl RecDecoder {
         for &t in &wanted { if (t as usize) < kinds.len() { kinds[t as usize] = TagKind::Wanted; mask[t as usize] = true; } }
         let mut full = vec![true; 65536];
         if let Some(sl) = &slim { for &t in sl { if (t as usize) < full.len() { full[t as usize] = false; } } }
+        // keep mode: decode everything in full (kept for take_kept), apply the slim form only to the Python view returned now
+        let full_dec: Vec<bool> = if keep { vec![true; 65536] } else { full.clone() };
         let canon = extract::canon_tags(&s);
         let only: Option<FxHashSet<u64>> = only_ids.map(|v| v.into_iter().collect());
         let w = s.idsize;
-        let p = Params { w, kinds: &kinds, canon: &canon, full: &full, only: only.as_ref() };
+        let p = Params { w, kinds: &kinds, canon: &canon, full: &full_dec, only: only.as_ref() };
         let tm = std::env::var("RVT_CORE_TIMING").is_ok();
         let t0 = std::time::Instant::now();
         let want_block = self.sink.is_some();
@@ -352,6 +377,7 @@ impl RecDecoder {
         }
         if tm { eprintln!("rvt_core extract: to python {:?}", t0.elapsed() - t3); }
         if let (Some(sk), Some(b)) = (self.sink.as_mut(), block) { sk.extend_from_slice(&b); }
+        if let Some(k) = self.kept.as_mut() { k.push((recs, ehs)); }
         Ok(PyTuple::new_bound(py, [lr.into_py(py), le.into_py(py)]))
     }
 }

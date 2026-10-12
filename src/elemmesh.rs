@@ -425,11 +425,27 @@ impl MeshDoc {
             d.set_item("tris", PyList::new_bound(py, tl))?;
         }
         if !m.none {
-            d.set_item("fid", PyList::new_bound(py, &m.fid))?;
-            d.set_item("nid", PyList::new_bound(py, &m.nid))?;
             if compact {
-                d.set_item("surf", PyList::new_bound(py, m.meta.iter().map(|x| x.kind)))?;
+                // compact form: numpy arrays (fid/nid int64, surf uint8 codes into surf_names)
+                let arr_i64 = |v: &[i64]| -> PyResult<Bound<'py, PyAny>> {
+                    let mut b = Vec::with_capacity(v.len() * 8);
+                    for x in v { b.extend_from_slice(&x.to_le_bytes()); }
+                    np.getattr("frombuffer")?.call1((PyBytes::new_bound(py, &b), "<i8"))?.call_method0("copy")
+                };
+                d.set_item("fid", arr_i64(&m.fid)?)?;
+                d.set_item("nid", arr_i64(&m.nid)?)?;
+                let mut names: Vec<&str> = vec![];
+                let mut codes: Vec<u8> = Vec::with_capacity(m.meta.len());
+                for x in &m.meta {
+                    let c = match names.iter().position(|n| *n == x.kind) { Some(i) => i, None => { names.push(x.kind); names.len() - 1 } };
+                    codes.push(c as u8);
+                }
+                d.set_item("surf", np.getattr("frombuffer")?.call1((PyBytes::new_bound(py, &codes), "u1"))?.call_method0("copy")?)?;
+                d.set_item("surf_names", PyList::new_bound(py, names))?;
             } else {
+                d.set_item("fid", PyList::new_bound(py, &m.fid))?;
+                d.set_item("nid", PyList::new_bound(py, &m.nid))?;
+            {
                 let mut evs: FxHashMap<usize, PyObject> = FxHashMap::default();
                 let none_ev: Py<SurfEval> = Py::new(py, SurfEval { s: None, np_array: np.getattr("array")?.unbind() })?;
                 let ml = PyList::empty_bound(py);
@@ -448,6 +464,7 @@ impl MeshDoc {
                 d.set_item("meta", ml)?;
             }
         }
+            }
         d.set_item("source", m.source)?;
         d.set_item("flags", PyList::new_bound(py, &m.flags))?;
         if !m.none {
