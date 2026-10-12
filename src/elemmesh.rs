@@ -213,6 +213,17 @@ impl Ctx {
                     }
                 }
                 if !per.is_empty() {
+                    // exact duplicate bodies (same corners) are one solid in Revit's geometry
+                    let mut seen: rustc_hash::FxHashSet<(usize, [u64; 3], [u64; 3], String)> = Default::default();
+                    per.retain(|p| {
+                        let pts: Vec<V3> = p.0.iter().flat_map(|t| t.iter().copied()).collect();
+                        let (mut mn, mut mx) = (pts[0], pts[0]);
+                        for q in &pts { for k in 0..3 { mn[k] = mn[k].min(q[k]); mx[k] = mx[k].max(q[k]); } }
+                        let r3 = |v: V3| [((v[0] * 1000.0).round_ties_even() / 1000.0 + 0.0).to_bits(), ((v[1] * 1000.0).round_ties_even() / 1000.0 + 0.0).to_bits(), ((v[2] * 1000.0).round_ties_even() / 1000.0 + 0.0).to_bits()];
+                        let flat: Vec<f64> = pts.iter().flat_map(|q| [q[0].abs(), q[1].abs(), q[2].abs()]).collect();
+                        let sg = (p.0.len(), r3(mn), r3(mx), format!("{:.2}", np_sum(&flat)));
+                        seen.insert(sg)
+                    });
                     own = per.iter().flat_map(|p| p.0.iter().copied()).collect();
                     ownm = per.iter().flat_map(|p| p.1.iter().cloned()).collect();
                     ownf = per.iter().flat_map(|p| p.2.iter().copied()).collect();
@@ -364,21 +375,24 @@ struct Py_ {
     earcut: Py<PyAny>,
 }
 
-/// mapbox_earcut.triangulate_float64 through Python (same triangulation as the reference); called from worker threads with the GIL
-fn earcut_py(p: &Py_, verts: &[UV], ends: &[u32]) -> Option<Vec<u32>> {
-    Python::with_gil(|py| -> Option<Vec<u32>> {
+/// mapbox_earcut.triangulate_float64 through Python (same triangulation as the reference): one GIL acquisition per batch (one Geometry node)
+fn earcut_py(p: &Py_, reqs: &[(&[UV], &[u32])]) -> Vec<Option<Vec<u32>>> {
+    Python::with_gil(|py| {
         let np = p.np.bind(py);
-        let arr = if verts.is_empty() {
-            np.getattr("array").ok()?.call1((PyList::empty_bound(py),)).ok()?.call_method1("astype", ("float64",)).ok()?
-        } else {
-            let mut b = Vec::with_capacity(verts.len() * 16);
-            for q in verts { b.extend_from_slice(&q[0].to_le_bytes()); b.extend_from_slice(&q[1].to_le_bytes()); }
-            np.getattr("frombuffer").ok()?.call1((PyBytes::new_bound(py, &b), "<f8")).ok()?.call_method1("reshape", (-1, 2)).ok()?.call_method0("copy").ok()?
+        let one = |verts: &[UV], ends: &[u32]| -> Option<Vec<u32>> {
+            let arr = if verts.is_empty() {
+                np.getattr("array").ok()?.call1((PyList::empty_bound(py),)).ok()?.call_method1("astype", ("float64",)).ok()?
+            } else {
+                let mut b = Vec::with_capacity(verts.len() * 16);
+                for q in verts { b.extend_from_slice(&q[0].to_le_bytes()); b.extend_from_slice(&q[1].to_le_bytes()); }
+                np.getattr("frombuffer").ok()?.call1((PyBytes::new_bound(py, &b), "<f8")).ok()?.call_method1("reshape", (-1, 2)).ok()?.call_method0("copy").ok()?
+            };
+            let rings = np.getattr("array").ok()?.call1((ends.to_vec(), "uint32")).ok()?;
+            let r = p.earcut.bind(py).call1((arr, rings)).ok()?;
+            let bytes: Vec<u8> = r.call_method1("astype", ("<u4",)).ok()?.call_method0("tobytes").ok()?.extract().ok()?;
+            Some(bytes.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect())
         };
-        let rings = np.getattr("array").ok()?.call1((ends.to_vec(), "uint32")).ok()?;
-        let r = p.earcut.bind(py).call1((arr, rings)).ok()?;
-        let bytes: Vec<u8> = r.call_method1("astype", ("<u4",)).ok()?.call_method0("tobytes").ok()?.extract().ok()?;
-        Some(bytes.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect())
+        reqs.iter().map(|(v, e)| one(v, e)).collect()
     })
 }
 
@@ -451,7 +465,7 @@ impl MeshDoc {
         let ctx = self.ctx.clone();
         let pp = self.py_.clone();
         let r = py.allow_threads(move || {
-            let ec = move |v: &[UV], e: &[u32]| earcut_py(&pp, v, e);
+            let ec = move |r: &[(&[UV], &[u32])]| earcut_py(&pp, r);
             ctx.element_mesh(eid, symbol_depth, detail, &ec)
         });
         match &*r { Ok(m) => self.to_py(py, m, false), Err(_) => Err(PyKeyError::new_err(format!("element_mesh({}) raised in the reference path", eid))) }
@@ -464,7 +478,7 @@ impl MeshDoc {
         let ctx = self.ctx.clone();
         let pp = self.py_.clone();
         let res: Vec<Arc<Rs<EMesh>>> = py.allow_threads(move || {
-            let ec = move |v: &[UV], e: &[u32]| earcut_py(&pp, v, e);
+            let ec = move |r: &[(&[UV], &[u32])]| earcut_py(&pp, r);
             ids.par_iter().map(|&e| ctx.element_mesh(e, symbol_depth, detail, &ec)).collect()
         });
         let out = PyList::empty_bound(py);

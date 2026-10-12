@@ -272,8 +272,8 @@ class Progress:
         import time, threading
         os.makedirs(s.DIR, exist_ok=True)
         s.path = os.path.join(s.DIR, file_key(f) + '.json'); s.t0 = time.time()
-        s.d = {'file': os.path.abspath(f), 'stage': 'start', 'done': 0, 'total': 0, 'elements_decoded': 0, 'meshes_done': 0, 'bytes_read': 0, 'eta_s': None, 'started': s.t0, 'final': False}
-        s._lock = threading.Lock(); s._dirty = True; s._stop = threading.Event(); s._stage_t = s.t0
+        s.d = {'file': os.path.abspath(f), 'stage': 'start', 'done': 0, 'total': 0, 'elements_decoded': 0, 'meshes_done': 0, 'meshes_total': 0, 'bytes_read': 0, 'eta_s': None, 'started': s.t0, 'final': False}
+        s._lock = threading.Lock(); s._wlock = threading.Lock(); s._dirty = True; s._stop = threading.Event(); s._stage_t = s.t0
         s._th = threading.Thread(target=s._loop, daemon=True); s._th.start()
     def set(s, stage=None, **kw):
         import time
@@ -284,13 +284,16 @@ class Progress:
             s._dirty = True
         if stage is not None: s._write()
     def _write(s):
-        import json, time
-        with s._lock:
-            if not s._dirty: return
-            d = dict(s.d); d['updated'] = time.time(); s._dirty = False
-        tmp = s.path + '.%d.tmp' % os.getpid()
-        with open(tmp, 'w') as fh: json.dump(d, fh)
-        os.replace(tmp, s.path)
+        import json, time, threading
+        with s._wlock:
+            with s._lock:
+                if not s._dirty: return
+                d = dict(s.d); d['updated'] = time.time(); s._dirty = False
+            tmp = s.path + '.%d.%d.tmp' % (os.getpid(), threading.get_ident())
+            try:
+                with open(tmp, 'w') as fh: json.dump(d, fh)
+                os.replace(tmp, s.path)
+            except OSError: pass
     def _loop(s):
         while not s._stop.wait(0.25): s._write()
     def close(s, stage='done'):
@@ -365,11 +368,17 @@ def resolve(src, rid, via, path):
     import rvt_map2 as M; return M.resolve(src, rid, via, path)
 
 _PLOCK = __import__('threading').Lock()
-def params(path):
+def params(path, x=None):
     """== rvt_params.params(path): the reference code, with its three hot kernels (Src/resolve/rvt_ifc.stored) running in Rust"""
     import rvt_params as P, rvt_map2 as M, rvt_ifc
     if not on(): return P.params(path)
     with _PLOCK:
+        import rvt_xcache
+        if x is None and on():
+            x = extract(path, want_all=True)              # the extraction rvt_xcache.get_x would return (fast path + binary cache), without its pickle
+        if x is not None:
+            xx = {k: v for k, v in x.items() if k != 'sch'}
+            saved_x = rvt_xcache.get_x; rvt_xcache.get_x = lambda p, xx=xx: xx
         saved = (M.Src, M.resolve, rvt_ifc.stored)
         FS = _rc().FlatSrc; orig = M.resolve
         def resolve_bound(src, rid, via, path, FS=FS, orig=orig):
@@ -380,4 +389,163 @@ def params(path):
         try: return P.params(path)
         finally:
             M.Src, M.resolve, rvt_ifc.stored = saved
+            if x is not None: rvt_xcache.get_x = saved_x
             if gc_was: gc.enable()
+
+# ---------------- progressive open for the viewer ----------------
+QUICK_FULL = ('Level', 'Grid', 'WallSweep')
+
+def _sgn(v, W):
+    v = int(v); b = 8 * W
+    return v - (1 << b) if v >= 1 << (b - 1) else v
+
+def _mod_hash(names):
+    import hashlib
+    h = hashlib.sha1(reader_version().encode())
+    for n in names:
+        fn = os.path.join(READER, n)
+        if os.path.exists(fn): h.update(open(fn, 'rb').read())
+    return h.hexdigest()[:12]
+
+def params_version(): return _mod_hash(['rvt_params.py', 'rvt_map2.py', 'rvt_famparams.py', 'rvt_geom.py', 'rvt_uid.py', 'ifcguid.py', 'rvt_ifc.py', 'map3_train.json', 'param_names.json', 'rvt_entities.py'])
+def mesh_version(): return _mod_hash(['rvt_mesh.py', 'rvt_elemmesh.py', 'rvt_curves.py', 'g103_get.py'])
+
+def _cache_on(): return not os.environ.get('RVT_NOCACHE') and not os.environ.get('RVT_CORE_NOCACHE')
+
+def _census_of(x):
+    import rvt_entities as E
+    cen = {'cls': {}, 'ws': {}}
+    for (eid, c), r in x['recs'].items():
+        cen['cls'].setdefault(eid, c)
+        if c == 'WallSweep':
+            try: cen['ws'][eid] = int(E.S_(r['fields'], 'm_wallSweepInfo', 'm_wallSweepType'))
+            except Exception: pass
+    return cen
+
+class MeshStream:
+    """background computation of element meshes (Rust, GIL released while computing); iterate to get lists of (id, mesh) as chunks finish"""
+    def __init__(s, model, ids, chunk, compact):
+        import threading, queue
+        s.q = queue.Queue(); s.model = model; s.ids = [int(i) for i in ids]; s.chunk = chunk; s.compact = compact; s.t_first = s.t_done = None
+        s.th = threading.Thread(target=s._run, daemon=True); s.th.start()
+    def _run(s):
+        m = s.model
+        try:
+            cache = m._mesh_cache() if s.compact else {}
+            todo = [e for e in s.ids if e not in cache]
+            hit = [(e, cache[e]) for e in s.ids if e in cache]
+            import time
+            n = 0; m._set(meshes_total=len(s.ids), meshes_done=0)
+            for k in range(0, len(hit), 4096):
+                part = hit[k:k + 4096]; n += len(part); m._set(meshes_done=n); s._put(part)
+            if todo:
+                md = mesh_doc(m.doc()); new = {}
+                for k in range(0, len(todo), s.chunk):
+                    part = todo[k:k + s.chunk]; res = md.element_meshes(part, compact=s.compact)
+                    n += len(part); m._set(meshes_done=n)
+                    out = list(zip(part, res)); new.update(out); s._put(out)
+                if s.compact: m._mesh_cache_add(new)
+        except Exception as ex:
+            s.q.put(ex)
+        s.t_done = time.time(); s.q.put(None)
+    def _put(s, part):
+        import time
+        if s.t_first is None: s.t_first = time.time()
+        s.q.put(part)
+    def __iter__(s):
+        while True:
+            x = s.q.get()
+            if x is None: return
+            if isinstance(x, Exception): raise x
+            yield x
+
+class Model:
+    """Progressive open of a Revit file; every stage is reported in the progress file (Progress, ~/.cache/rvt-progress/<file_key>.json):
+       quick()  -> {'elements': {id: {'class', 'category', 'bbox'}}, 'levels', 'grids', 'W'}  (records decoded, only Level/Grid/WallSweep kept in full)
+       start_meshes(ids, chunk=128, compact=True) -> MeshStream (iterate: lists of (id, mesh)); runs while full() works
+       full()   -> (x, params) == (rvt_entities.extract(path, want_all=True), rvt_params.params(path))
+       close()  -> final progress state ('done')
+    Results are cached in ~/.cache/rvt-core (binary, keyed by file + reader/mesh/params code versions + schema)."""
+    def __init__(s, path, progress=True):
+        s.path = os.path.abspath(path); s.key = file_key(path); s.prog = Progress(path) if progress else None
+        s._x = None; s._doc = None; s._cen = None; s._mc = None
+        import threading; s._lock = threading.Lock()
+    def _set(s, stage=None, **kw):
+        if s.prog: s.prog.set(stage, **kw)
+    def quick(s):
+        s._set('quick', total=1)
+        x = extract(s.path, want_all=True, slim=lambda c: c in QUICK_FULL)
+        s._cen = _census_of(x)
+        W = x['W']; els = {}
+        for (eid, c), r in x['recs'].items():
+            if eid in els: continue
+            h = x['eh'].get(eid); bb = None; cat = None
+            if h:
+                cid = h.get('m_categroryId'); cat = _sgn(cid, W) if cid is not None else None
+                pb = h.get('m_pBBox'); pb = pb.get('obj', pb) if isinstance(pb, dict) else pb
+                mm = pb.get('m_minmax') if isinstance(pb, dict) else None
+                if mm and len(mm) == 2: bb = [list(map(float, mm[0])), list(map(float, mm[1]))]
+            els[eid] = {'class': c, 'category': cat, 'bbox': bb}
+        levels = []; grids = []
+        for (eid, c), r in x['recs'].items():
+            f = r['fields']
+            if c == 'Level':
+                o = f.get('m_pSurface'); o = o.get('obj', o) if isinstance(o, dict) else o
+                z = (o.get('m_origin') or [None] * 3)[2] if isinstance(o, dict) else None
+                levels.append({'id': eid, 'name': f.get('m_text', ''), 'elevation_ft': z})
+            elif c == 'Grid': grids.append({'id': eid, 'name': f.get('m_text', '')})
+        levels.sort(key=lambda l: (l['elevation_ft'] is None, l['elevation_ft']))
+        s._set(done=1, elements_decoded=len(els))
+        return {'elements': els, 'levels': levels, 'grids': grids, 'W': W}
+    def full(s):
+        import rvt_decode as D
+        s._set('extract', total=1)
+        x = s._x = extract(s.path, want_all=True)
+        s._set(done=1, elements_decoded=len(x['recs']))
+        s._set('params', total=1)
+        fn = os.path.join(CACHE, '%s-p%s.pk' % (s.key, params_version()))
+        p = None
+        if _cache_on() and os.path.exists(fn):
+            try: p = _rc().unpack(fn, D.EID)
+            except Exception: p = None
+        if p is None:
+            p = params(s.path, x)
+            if _cache_on():
+                try: os.makedirs(CACHE, exist_ok=True); tmp = fn + '.%d.tmp' % os.getpid(); open(tmp, 'wb').write(_rc().pack(p, D.EID)); os.replace(tmp, fn)
+                except Exception: pass
+        s._set(done=1)
+        return x, p
+    def doc(s):
+        with s._lock:
+            if s._doc is None:
+                d = Doc(s.path)
+                cen = s._cen if s._cen is not None else (_census_of(s._x) if s._x is not None else None)
+                if cen is not None: d._cen = cen
+                s._doc = d
+            return s._doc
+    def _mesh_fn(s): return os.path.join(CACHE, '%s-m%s.pk' % (s.key, mesh_version()))
+    def _mesh_cache(s):
+        import rvt_decode as D
+        if s._mc is None:
+            s._mc = {}
+            if _cache_on() and os.path.exists(s._mesh_fn()):
+                try: s._mc = _rc().unpack(s._mesh_fn(), D.EID)
+                except Exception: s._mc = {}
+        return s._mc
+    def _mesh_cache_add(s, new):
+        import rvt_decode as D
+        if not _cache_on() or not new: return
+        mc = s._mesh_cache(); mc.update(new)
+        try: os.makedirs(CACHE, exist_ok=True); fn = s._mesh_fn(); tmp = fn + '.%d.tmp' % os.getpid(); open(tmp, 'wb').write(_rc().pack(mc, D.EID)); os.replace(tmp, fn)
+        except Exception: pass
+    def start_meshes(s, ids, chunk=128, compact=True):
+        return MeshStream(s, ids, chunk, compact)
+    def meshes(s, ids, chunk=128, compact=True):
+        """synchronous form of start_meshes"""
+        yield from s.start_meshes(ids, chunk, compact)
+    def mesh_ids(s):
+        """elements the viewer meshes: channel-103 record with a bbox, class not a symbol/type"""
+        d = s.doc(); cen = d._census()
+        return [e for e, i in d.res.items() if i.get('bbox') and cen['cls'].get(e) and not cen['cls'][e].endswith('Symbol')]
+    def close(s):
+        if s.prog: s.prog.close()

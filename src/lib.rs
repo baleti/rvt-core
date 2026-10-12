@@ -10,6 +10,7 @@ mod mesh;
 mod elemmesh;
 mod params;
 mod cache;
+mod pack;
 use flate2::read::DeflateDecoder;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -137,6 +138,8 @@ fn rvt_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(header_candidates, m)?)?;
     m.add_class::<decoder::RecDecoder>()?;
     m.add_class::<params::FlatSrc>()?;
+    m.add_function(wrap_pyfunction!(pack::pack, m)?)?;
+    m.add_function(wrap_pyfunction!(pack::unpack, m)?)?;
     m.add_function(wrap_pyfunction!(params::ifc_stored, m)?)?;
     Ok(())
 }

@@ -795,6 +795,51 @@ pub fn cycles_from_polylines(polys: &[Vec<UV>], tol: f64) -> Vec<Vec<UV>> {
     cycles
 }
 
+/// rvt_mesh._loop_via_poles: chain the face's edge polylines end to end, jumping along poles (both ends map to one 3D point); closed loop or None
+pub fn loop_via_poles(mine: &[(i128, Mine)], ev: &Surf) -> Option<Vec<UV>> {
+    let tol = 1e-6;
+    let segs: Vec<Vec<UV>> = mine.iter().map(|(_, m)| { let mut v = vec![m.a]; v.extend(m.inter.iter().copied()); v.push(m.b); v }).collect();
+    if segs.is_empty() { return None; }
+    let close = |p: UV, q: UV| (p[0] - q[0]).abs() < tol && (p[1] - q[1]).abs() < tol;
+    let mut used = vec![false; segs.len()];
+    used[0] = true;
+    let mut pts: Vec<UV> = segs[0].clone();
+    let mut poles = 0;
+    for _ in 0..segs.len() {
+        let cur = *pts.last().unwrap();
+        let mut nxt: Option<(usize, Vec<UV>)> = None;
+        for (j, sg) in segs.iter().enumerate() {
+            if used[j] { continue; }
+            if close(sg[0], cur) { nxt = Some((j, sg.clone())); break; }
+            if close(*sg.last().unwrap(), cur) { let mut r = sg.clone(); r.reverse(); nxt = Some((j, r)); break; }
+        }
+        if nxt.is_none() {
+            'outer: for (j, sg) in segs.iter().enumerate() {
+                if used[j] { continue; }
+                let mut rv = sg.clone();
+                rv.reverse();
+                for cand in [sg.clone(), rv] {
+                    if norm(sub(ev.eval(cand[0][0], cand[0][1]), ev.eval(cur[0], cur[1]))) < 1e-7 && ((cand[0][0] - cur[0]).abs() > tol || (cand[0][1] - cur[1]).abs() > tol) {
+                        nxt = Some((j, cand));
+                        poles += 1;
+                        break 'outer;
+                    }
+                }
+            }
+        }
+        let (j, sg) = match nxt { Some(x) => x, None => break };
+        used[j] = true;
+        pts.extend(sg);
+    }
+    if !used.iter().all(|u| *u) { return None; }
+    let (f0, l0) = (pts[0], *pts.last().unwrap());
+    if !close(l0, f0) {
+        if norm(sub(ev.eval(l0[0], l0[1]), ev.eval(f0[0], f0[1]))) < 1e-7 { poles += 1; } else { return None; }
+    }
+    let _ = poles;
+    if pts.len() >= 3 { Some(pts) } else { None }
+}
+
 /// rvt_mesh._cancel_slits
 pub fn cancel_slits(ring: &[UV]) -> Vec<Vec<UV>> {
     let tol = 1e-6;
@@ -1001,8 +1046,14 @@ pub struct Meta {
 
 pub type Tri = [V3; 3];
 
-/// triangulator: (vertices, ring ends) -> flat triangle indices, None = exception (mapbox_earcut.triangulate_float64 semantics)
-pub type Earcut<'e> = &'e (dyn Fn(&[UV], &[u32]) -> Option<Vec<u32>> + Sync);
+/// batch triangulator: [(vertices, ring ends)] -> flat triangle indices per polygon, None = exception (mapbox_earcut.triangulate_float64 semantics)
+pub type Earcut<'e> = &'e (dyn Fn(&[(&[UV], &[u32])]) -> Vec<Option<Vec<u32>>> + Sync);
+
+/// output of one face (or one outer+holes group of a face), in face order; triangulation deferred so that one Geometry node needs one batch call
+enum Job {
+    Tris(Vec<(Tri, Meta, i64)>),
+    Ear { verts: Vec<UV>, ends: Vec<u32>, nf: i64, kind: SKind, ev: Arc<Surf>, drop_degenerate: bool },
+}
 
 #[derive(Default)]
 pub struct Tess {
@@ -1050,6 +1101,7 @@ pub fn tessellate(kk: &K, faces: &[&Val], edges: &EdgeMap, earcut: Earcut) -> Rs
         }
     }
     let mut nf: i64 = 0;
+    let mut jobs: Vec<Job> = vec![];
     for fc in faces {
         let f = ob(fc);
         if !is_dict(f) { continue; }
@@ -1061,19 +1113,51 @@ pub fn tessellate(kk: &K, faces: &[&Val], edges: &EdgeMap, earcut: Earcut) -> Rs
             _ => false,
         };
         let h = handle_of(fc)?;
-        let (mut loops, _) = face_loops_uv(kk, h, edges, Some(&surfs), false)?;
+        let (mut loops, mine0) = face_loops_uv(kk, h, edges, Some(&surfs), false)?;
+        if loops.is_empty() {
+            let lp = if !mine0.is_empty() { loop_via_poles(&mine0, &ev) } else { None };
+            // e0, e1 = _ob(_ob(f['m_pFirstLoop'])['m_Envelope'])['m_corners']
+            let env = (|| -> Option<(UV, UV)> {
+                let fl_ = ob(dget(f, kk.k("m_pFirstLoop"))?);
+                let l = list(dget(ob(dget(fl_, kk.k("m_Envelope"))?), kk.k("m_corners"))?).ok()?;
+                if l.len() != 2 { return None; }
+                Some((uv2(&l[0]).ok()?, uv2(&l[1]).ok()?))
+            })();
+            let (rect_a, e0, e1) = match env { Some((e0, e1)) => ((e1[0] - e0[0]) * (e1[1] - e0[1]), e0, e1), None => (0.0, [0.0; 2], [0.0; 2]) };
+            let mut off_border = false;
+            if rect_a > 0.0 {
+                for (_, m) in &mine0 {
+                    for q in std::iter::once(&m.a).chain(m.inter.iter()).chain(std::iter::once(&m.b)) {
+                        if !((q[0] - e0[0]).abs() < 1e-4 || (q[0] - e1[0]).abs() < 1e-4 || (q[1] - e0[1]).abs() < 1e-4 || (q[1] - e1[1]).abs() < 1e-4) { off_border = true; }
+                    }
+                }
+            }
+            if let Some(lp) = lp { if off_border && area2(&lp).abs() > 1e-3 * rect_a { loops = vec![lp]; } }
+        }
         if loops.is_empty() {
             let (lg, _) = face_loops_uv(kk, h, edges, Some(&surfs), true)?;
             let cc = env_corners_tess(kk, f);
+            let mut first = false;
             if !lg.is_empty() {
                 if let Some((cc0, cc1)) = cc {
                     let s: f64 = lg.iter().fold(0.0, |a, l| a + area2(l).abs());
                     if s > 0.0 {
                         let den = (cc1[0] - cc0[0]) * (cc1[1] - cc0[1]);
                         if den == 0.0 { return Err(Raise); }
-                        if (s / den - 1.0).abs() < 0.03 { loops = lg; }
+                        if (s / den - 1.0).abs() < 0.03 { first = true; }
                     }
                 }
+            }
+            if first { loops = lg; }
+            else if lg.len() == 1 {
+                let lp = &lg[0];
+                let nn = lp.len();
+                let mut npole = 0;
+                for i in 0..nn {
+                    let (p_, q_) = (lp[i], lp[(i + 1) % nn]);
+                    if (p_[0] - q_[0]).abs() + (p_[1] - q_[1]).abs() > 1e-3 && norm(sub(ev.eval(p_[0], p_[1]), ev.eval(q_[0], q_[1]))) < 1e-7 { npole += 1; }
+                }
+                if npole >= 1 { loops = lg; }
             }
         }
         if loops.is_empty() {
@@ -1091,7 +1175,7 @@ pub fn tessellate(kk: &K, faces: &[&Val], edges: &EdgeMap, earcut: Earcut) -> Rs
                             let po = ob(p_);
                             if !is_dict(po) || !has(po, kk.k("uv")) { continue; }
                             let [u_, v_] = pt_uv(kk, p_, sd)?;
-                            if !((u_ - c0[0]).abs() < 1e-6 || (u_ - c1[0]).abs() < 1e-6 || (v_ - c0[1]).abs() < 1e-6 || (v_ - c1[1]).abs() < 1e-6) { on_rect = false; }
+                            if !((u_ - c0[0]).abs() < 1e-4 || (u_ - c1[0]).abs() < 1e-4 || (v_ - c0[1]).abs() < 1e-4 || (v_ - c1[1]).abs() < 1e-4) { on_rect = false; }
                         }
                     }
                     if !on_rect { c = None; }
@@ -1139,18 +1223,18 @@ pub fn tessellate(kk: &K, faces: &[&Val], edges: &EdgeMap, earcut: Earcut) -> Rs
                         let (nu, nv) = (us.len() - 1, vs.len() - 1);
                         nf += 1;
                         out.fprio.push((nf, pr));
+                        let mut v = vec![];
                         for i in 0..nu {
                             for j in 0..nv {
                                 let (a_, b_, c_, d_) = ([us[i], vs[j]], [us[i + 1], vs[j]], [us[i + 1], vs[j + 1]], [us[i], vs[j + 1]]);
                                 for tri in [[a_, b_, c_], [a_, c_, d_]] {
                                     let p = [ev.eval(tri[0][0], tri[0][1]), ev.eval(tri[1][0], tri[1][1]), ev.eval(tri[2][0], tri[2][1])];
                                     if !tri_ok(&p) { continue; }
-                                    out.tris.push(p);
-                                    out.meta.push(Meta { kind: kind.name(), ev: MetaEv::S(ev.clone()), uv: Some(tri) });
-                                    out.fidx.push(nf);
+                                    v.push((p, Meta { kind: kind.name(), ev: MetaEv::S(ev.clone()), uv: Some(tri) }, nf));
                                 }
                             }
                         }
+                        jobs.push(Job::Tris(v));
                         continue;
                     }
                     for bi in [0usize, 1] {
@@ -1186,16 +1270,8 @@ pub fn tessellate(kk: &K, faces: &[&Val], edges: &EdgeMap, earcut: Earcut) -> Rs
                     }
                     nf += 1;
                     out.fprio.push((nf, pr));
-                    let idx = match earcut(&ring, &[ring.len() as u32]) { Some(i) => i, None => { out.unsup.push("earcut"); continue; } };
-                    let p: Vec<V3> = ring.iter().map(|q| ev.eval(q[0], q[1])).collect();
-                    for k in (0..idx.len() / 3 * 3).step_by(3) {
-                        let (i0, i1, i2) = (idx[k] as usize, idx[k + 1] as usize, idx[k + 2] as usize);
-                        let pt = [p[i0], p[i1], p[i2]];
-                        if !tri_ok(&pt) { continue; }
-                        out.tris.push(pt);
-                        out.meta.push(Meta { kind: kind.name(), ev: MetaEv::S(ev.clone()), uv: Some([ring[i0], ring[i1], ring[i2]]) });
-                        out.fidx.push(nf);
-                    }
+                    let n = ring.len() as u32;
+                    jobs.push(Job::Ear { verts: ring, ends: vec![n], nf, kind, ev: ev.clone(), drop_degenerate: true });
                     continue;
                 }
             }
@@ -1207,18 +1283,34 @@ pub fn tessellate(kk: &K, faces: &[&Val], edges: &EdgeMap, earcut: Earcut) -> Rs
             let mut verts = nudge_repeats(&outer);
             let mut ends = vec![verts.len() as u32];
             for hl in holes { verts.extend(hl); ends.push(verts.len() as u32); }
-            let idx = match earcut(&verts, &ends) { Some(i) => i, None => { out.unsup.push("earcut"); continue; } };
-            let p: Vec<V3> = verts.iter().map(|q| ev.eval(q[0], q[1])).collect();
-            for k in (0..idx.len() / 3 * 3).step_by(3) {
-                let (i0, i1, i2) = (idx[k] as usize, idx[k + 1] as usize, idx[k + 2] as usize);
-                if i0 >= p.len() || i1 >= p.len() || i2 >= p.len() { return Err(Raise); }
-                out.tris.push([p[i0], p[i1], p[i2]]);
-                out.meta.push(Meta { kind: kind.name(), ev: MetaEv::S(ev.clone()), uv: Some([verts[i0], verts[i1], verts[i2]]) });
-                out.fidx.push(nf);
-            }
+            jobs.push(Job::Ear { verts, ends, nf, kind, ev: ev.clone(), drop_degenerate: false });
         }
     }
     out.faces = nf;
+    // one batch triangulation for the node, then emit in face order
+    let reqs: Vec<(&[UV], &[u32])> = jobs.iter().filter_map(|j| match j { Job::Ear { verts, ends, .. } => Some((verts.as_slice(), ends.as_slice())), _ => None }).collect();
+    let res = if reqs.is_empty() { vec![] } else { earcut(&reqs) };
+    let mut ri = 0;
+    for j in jobs {
+        match j {
+            Job::Tris(v) => { for (t, m, f) in v { out.tris.push(t); out.meta.push(m); out.fidx.push(f); } }
+            Job::Ear { verts, nf, kind, ev, drop_degenerate, .. } => {
+                let r = res.get(ri).cloned().flatten();
+                ri += 1;
+                let idx = match r { Some(i) => i, None => { out.unsup.push("earcut"); continue; } };
+                let p: Vec<V3> = verts.iter().map(|q| ev.eval(q[0], q[1])).collect();
+                for k in (0..idx.len() / 3 * 3).step_by(3) {
+                    let (i0, i1, i2) = (idx[k] as usize, idx[k + 1] as usize, idx[k + 2] as usize);
+                    if i0 >= p.len() || i1 >= p.len() || i2 >= p.len() { return Err(Raise); }
+                    let pt = [p[i0], p[i1], p[i2]];
+                    if drop_degenerate && !tri_ok(&pt) { continue; }
+                    out.tris.push(pt);
+                    out.meta.push(Meta { kind: kind.name(), ev: MetaEv::S(ev.clone()), uv: Some([verts[i0], verts[i1], verts[i2]]) });
+                    out.fidx.push(nf);
+                }
+            }
+        }
+    }
     Ok(out)
 }
 
