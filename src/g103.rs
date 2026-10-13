@@ -73,7 +73,7 @@ fn members_par(data: &[u8]) -> Option<Vec<Member>> {
         pos = i + size - 8;
     }
     // each member: deflate stream must end within the span (at most 8 bytes early: first member of 44-byte-header partitions)
-    let outs: Vec<Option<(Vec<u8>, usize)>> = spans
+    let outs: Vec<Option<(Vec<u8>, usize)>> = crate::pool::run(|| spans
         .par_iter()
         .map(|&(a, e)| match inflate(&data[a + 10..e]) {
             Some((o, used, true)) if used + 8 >= e - a - 10 => Some((o, a + 10 + used)),
@@ -82,7 +82,7 @@ fn members_par(data: &[u8]) -> Option<Vec<Member>> {
                 None
             }
         })
-        .collect();
+        .collect());
     let mut res = Vec::with_capacity(spans.len());
     let mut last_end = 0;
     for (k, ((a, _), o)) in spans.iter().zip(outs).enumerate() {

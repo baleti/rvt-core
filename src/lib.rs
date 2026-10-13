@@ -9,6 +9,7 @@ mod es;
 mod mesh;
 mod elemmesh;
 mod refvol;
+mod pool;
 mod params;
 mod cache;
 mod pack;
@@ -90,7 +91,7 @@ fn inflate_one(data: &[u8], sp: (usize, usize)) -> Option<Vec<u8>> {
 pub fn joined_vec(stored: &[u8]) -> Option<Vec<u8>> {
     let data = strip_pages_impl(stored);
     let spans = member_spans(&data)?;
-    let outs: Vec<Option<Vec<u8>>> = spans.par_iter().map(|sp| inflate_one(&data, *sp)).collect();
+    let outs: Vec<Option<Vec<u8>>> = crate::pool::run(|| spans.par_iter().map(|sp| inflate_one(&data, *sp)).collect());
     let mut total = 0usize;
     for o in &outs {
         total += o.as_ref()?.len();
@@ -111,8 +112,7 @@ fn joined<'py>(py: Python<'py>, stored: &[u8]) -> Option<Bound<'py, PyBytes>> {
 
 /// worker threads: RVT_THREADS, default min(6, cpus)
 fn init_pool() {
-    let n = std::env::var("RVT_THREADS").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).min(6)).max(1);
-    let _ = rayon::ThreadPoolBuilder::new().num_threads(n).build_global();
+    let _ = rayon::ThreadPoolBuilder::new().num_threads(pool::threads()).build_global();
 }
 
 /// Positions i where chunk[i+4 .. i+4+W] (little endian, any alignment) is in the sorted id list; ascending, i in [0, n-24].
@@ -122,7 +122,7 @@ fn header_candidates(py: Python<'_>, chunk: &[u8], ids_sorted: Vec<u64>, w: usiz
     if n < 32 || (w != 4 && w != 8) {
         return vec![];
     }
-    let mut out: Vec<usize> = py.allow_threads(|| {
+    let mut out: Vec<usize> = py.allow_threads(|| crate::pool::run(|| {
         (0..n.saturating_sub(w + 4))
             .into_par_iter()
             .filter_map(|p| {
@@ -134,7 +134,7 @@ fn header_candidates(py: Python<'_>, chunk: &[u8], ids_sorted: Vec<u64>, w: usiz
                 if ids_sorted.binary_search(&v).is_ok() { Some(p - 4) } else { None }
             })
             .collect()
-    });
+    }));
     out.sort_unstable();
     out.dedup();
     out

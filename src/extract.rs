@@ -44,7 +44,7 @@ pub fn candidates_tagged(chunk: &[u8], ids: &IdSet, w: usize, tagmask: &[bool]) 
     let hi = n - 24; // max header position
     let block = 1 << 16;
     let nb = (hi + 1 + block - 1) / block;
-    let parts: Vec<Vec<usize>> = (0..nb)
+    let parts: Vec<Vec<usize>> = crate::pool::run(|| (0..nb)
         .into_par_iter()
         .map(|bk| {
             let mut out = vec![];
@@ -65,7 +65,7 @@ pub fn candidates_tagged(chunk: &[u8], ids: &IdSet, w: usize, tagmask: &[bool]) 
             }
             out
         })
-        .collect();
+        .collect());
     parts.concat()
 }
 
@@ -154,7 +154,7 @@ pub fn decode_variant(dec: &mut Dec, chunk: &[u8], i: usize, short: bool, tag: u
 /// decode every candidate (long header; short header when the long one is not accepted) in parallel
 pub fn decode_all(s: &Schema, chunk: &[u8], cands: &[usize], p: &Params) -> Vec<Cand> {
     let w = p.w;
-    cands
+    crate::pool::run(|| cands
         .par_chunks(8)
         .map_init(
             || Dec::new(s),
@@ -183,7 +183,7 @@ pub fn decode_all(s: &Schema, chunk: &[u8], cands: &[usize], p: &Params) -> Vec<
             },
         )
         .flatten()
-        .collect()
+        .collect())
 }
 
 /// sequential replay of work(): returns (records in insertion order keyed (eid, canonical tag), headers in insertion order)

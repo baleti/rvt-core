@@ -125,7 +125,7 @@ impl RecDecoder {
             let gs = crate::g103::groups(&ms);
             let bufs: Vec<(usize, Vec<u8>)> = gs.iter().enumerate().filter(|(_, (ch, _))| *ch == Some(103)).map(|(gi, (_, ks))| (gi, crate::g103::group_buf(&ms, ks))).collect();
             drop(ms);
-            let entries: Vec<(usize, Vec<crate::g103::Entry>)> = bufs.par_iter().map(|(gi, b)| (*gi, crate::g103::chain(&s, b))).collect();
+            let entries: Vec<(usize, Vec<crate::g103::Entry>)> = crate::pool::run(|| bufs.par_iter().map(|(gi, b)| (*gi, crate::g103::chain(&s, b))).collect());
             (bufs, entries)
         });
         let k_bb = s.key_of.get("m_bBox").copied();
@@ -348,18 +348,18 @@ impl RecDecoder {
             let block = if want_block {
                 let mut b: Vec<u8> = Vec::new();
                 b.extend_from_slice(&(recs.len() as u32).to_le_bytes());
-                let parts: Vec<Vec<u8>> = recs.par_chunks(256).map(|ch| {
+                let parts: Vec<Vec<u8>> = crate::pool::run(|| recs.par_chunks(256).map(|ch| {
                     let mut o = vec![];
                     for ((eid, ct), r) in ch { o.extend_from_slice(&eid.to_le_bytes()); o.extend_from_slice(&ct.to_le_bytes()); crate::cache::put_rec(&mut o, r, !p.full[r.tag as usize]); }
                     o
-                }).collect();
+                }).collect());
                 for x in parts { b.extend_from_slice(&x); }
                 b.extend_from_slice(&(ehs.len() as u32).to_le_bytes());
-                let parts: Vec<Vec<u8>> = ehs.par_chunks(256).map(|ch| {
+                let parts: Vec<Vec<u8>> = crate::pool::run(|| ehs.par_chunks(256).map(|ch| {
                     let mut o = vec![];
                     for (eid, r) in ch { o.extend_from_slice(&eid.to_le_bytes()); crate::cache::put_val(&mut o, &r.fields, &r.slots); }
                     o
-                }).collect();
+                }).collect());
                 for x in parts { b.extend_from_slice(&x); }
                 Some(b)
             } else { None };

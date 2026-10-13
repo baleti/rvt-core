@@ -78,7 +78,7 @@ pub fn find_schemas(s: &Schema, d: &[u8]) -> Vec<Found> {
         if lim <= 0 { continue; }
         let lim = lim as usize;
         let off = if counted { 4 } else { 0 } + pre + 16 + post;
-        let cands: Vec<usize> = (0..lim)
+        let cands: Vec<usize> = crate::pool::run(|| (0..lim)
             .into_par_iter()
             .filter(|&i| {
                 let qq = i + off;
@@ -94,7 +94,7 @@ pub fn find_schemas(s: &Schema, d: &[u8]) -> Vec<Found> {
                 let (ch, ch2) = if ln > 0 { (d[(qq + 4).min(n - 1)], d[(qq + 5).min(n - 1)]) } else { (0x20, 0) };
                 (0x20..0x7f).contains(&ch) && ch2 == 0
             })
-            .collect();
+            .collect());
         let mut ci_ = 0usize;
         while ci_ < cands.len() {
             let p = cands[ci_];

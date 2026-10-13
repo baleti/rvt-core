@@ -575,13 +575,13 @@ impl MeshDoc {
         let pp = self.py_.clone();
         Ok(py.allow_threads(move || {
             let ec = move |r: &[(&[UV], &[u32])]| earcut_py(&pp, r);
-            ids.par_iter().map(|&e| {
+            crate::pool::run(|| ids.par_iter().map(|&e| {
                 let m = ctx.element_mesh(e, symbol_depth, detail, &ec);
                 match &*m {
                     Ok(m) if !m.tris.is_empty() && m.meta.len() == m.tris.len() => crate::refvol::refined_volume(&m.tris, &m.meta, levels, 5e-5, Some(&m.fid)).ok().map(|r| (r.0, r.1, r.2)),
                     _ => None,
                 }
-            }).collect()
+            }).collect())
         }))
     }
 
@@ -593,7 +593,7 @@ impl MeshDoc {
         let pp = self.py_.clone();
         let res: Vec<Arc<Rs<EMesh>>> = py.allow_threads(move || {
             let ec = move |r: &[(&[UV], &[u32])]| earcut_py(&pp, r);
-            ids.par_iter().map(|&e| ctx.element_mesh(e, symbol_depth, detail, &ec)).collect()
+            crate::pool::run(|| ids.par_iter().map(|&e| ctx.element_mesh(e, symbol_depth, detail, &ec)).collect())
         });
         let out = PyList::empty_bound(py);
         for r in res.iter() {
