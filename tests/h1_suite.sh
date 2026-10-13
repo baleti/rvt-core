@@ -28,6 +28,6 @@ for s in "$@"; do
     mesh) for f in $SUB; do run1 $log $f tests/diff_mesh.py --impl rust --n 300; done ;;
     refvol) for f in $SUB; do run1 $log $f tests/diff_refvol.py; done ;;
   esac
-  ok=$(grep -cE 'IDENTICAL$|  OK$' $log); fl=$(grep -cE 'FAILED rc|^FAIL ' $log); n=$(grep -cvE '^  ' $log)
+  ok=$(grep -cE 'IDENTICAL|  OK$' $log); fl=$(grep -cE 'FAILED rc|^FAIL ' $log); n=$(grep -cvE '^  ' $log)
   echo "$s done $(date +%H:%M): $ok ok, $fl failed, $((n - ok - fl)) DIFFERENT" >> $L/h1_summary.log
 done
