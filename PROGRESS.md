@@ -34,3 +34,11 @@ Next: element_mesh in Rust, params, binary cache, README timings.
   23:10 curved-face refinement (rect_grid / refine_curved) and dup-body style rule. Reference _cycles_from_polylines now sorted (my request) -> meshes bit-identical (300/300 on Facades, rst_basic, Residential).
 - Safety: params drift guard (a different rvt_params.py runs the reference loop with Rust kernels), adapter source in the cache key, python sources in pysrc/ (python/ only via release.sh), K::k debug assert.
 - refined_volume in Rust (viewer item 13 root cause = topology_check): Facades 141 curved meshes 34 s -> 0.6 s, equal to 1e-9.
+
+## 2026-10-13 (after the remote-host reboot)
+- Mirrored reference changes 00:10 / 04:40 / morning edits (whole-body rule via Rust volume_by_node pieces, refine_curved edge flips + boundary tolerance, nearly_closed 0.12,
+  refined_volume normal votes): bit-identical on Residential / rst_basic / Facades (300 each), Site 400 + Block 69; refined_volume 141/141 to 1e-9.
+- Fork-safe pool (viewer item 12 fixed; viewer now uses rvt_fast.Doc by default). GC freeze before re-enable: 6 MB first open 1.75 s, warm 0.51 s.
+- remote-host: params 69+ / mesh 25 / refvol 25 identical, rme reruns queued for an idle slice (per-file cap 4G after c4-geometry's OOMs).
+- Found: the reference is not bit-reproducible across CPUs (remote-host vs remote-host numpy SIMD); Rust identical on both.
+- Viewer conversion 2024 Structural 19.6 s (geometry 9.8 s, 57% the viewer's body_summary). Proposed get_x hook (pickle 1.6 s -> 0.6 s), rvt_rebar speedups.
