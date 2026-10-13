@@ -64,7 +64,7 @@ Per component, same machine (measured during development, single runs):
 
 ## Differential status (reference = pure Python, released build)
 * Extraction want_all 76/76 files identical (2 files killed by the per-file memory cap), default 26/26, slim 25/25; channel-103 index 78/78; ES schemas 78/78.
-* Params: 70/70 identical (8 rme files over the 6 GB per-file cap, re-run at 8 GB); the port mirrors rvt_params.py of 2026-10-13 21:30; any newer rvt_params.py runs the reference loop with the Rust kernels (drift guard).
+* Params: 70/70 identical (8 rme files over the 6 GB per-file cap, re-run at 8 GB); the port mirrors rvt_params.py of 2026-10-12 21:30; any newer rvt_params.py runs the reference loop with the Rust kernels (drift guard).
 * Meshes: bit-identical incl. per-triangle `mat` (300-400 sampled elements each: 2020 Residential, 2022 rst_basic, 2026 Facades, 2026 Site); uv containers (list vs tuple) are not compared.
   Corpus run of the current release: remote-host (tests/h1_suite.sh mesh refvol params).
 * refined_volume (Rust) vs reference: equal to 1e-9 relative (tests/diff_refvol.py).
