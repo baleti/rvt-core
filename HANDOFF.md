@@ -9,8 +9,8 @@
 * Emergency switch: `RVT_NOFAST=1`.
 
 ## Differential status
-* remote-host suites (logs in remote-host:~/h1logs/rvt-core, NOT in the synced tree): extract want_all 76/76, default 26/26, slim 25/25, g103 78/78, params 69/69, mesh 25/25 (0 different),
-  refvol 25/25; rme files killed by memory are being re-run (job h1-rvtcore-r, FILE_MEM=8G, diff_params now holds one extraction).
+* remote-host suites (logs in remote-host:~/h1logs/rvt-core, NOT in the synced tree): extract want_all 76/76, default 26/26, slim 25/25, g103 78/78, params 73/73, mesh 25/25, refvol 25/25 (0 different);
+  7 rme files were killed by memory before the batching fix (2026-10-13): re-run queued (h1 job rvtcore-r2, 4G per file, starts when the shared slice is idle).
 * remote-host's numpy gives other bits than remote-host's for the reference itself ("geometrically equivalent" lines on remote-host); bit-identity is checked on remote-host (bench/mcmp.py, tests/cmp_ids.py).
 
 ## Done this session (see PROGRESS.md)
