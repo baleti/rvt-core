@@ -62,11 +62,20 @@ Per component, same machine (measured during development, single runs):
 | all meshes, 40 MB first open | 12.1 s (2.9M triangles; the reference's curved-face refinement adds 38% triangles), warm 0.3 s | streamed |
 | viewer item 13 (Facades prefetch) | Rust stream 1.1 s of the stage; the rest was the viewer's refined_volume check: Rust drop-in 34 s -> 0.6 s | drop-in released |
 
-## Differential status (reference = pure Python, released build)
-* Extraction want_all 76/76 files identical (2 files killed by the per-file memory cap), default 26/26, slim 25/25; channel-103 index 78/78; ES schemas 78/78.
-* Params: 70/70 identical (8 rme files over the 6 GB per-file cap, re-run at 8 GB); the port mirrors rvt_params.py of 2026-10-12 21:30; any newer rvt_params.py runs the reference loop with the Rust kernels (drift guard).
-* Meshes: bit-identical incl. per-triangle `mat` (300-400 sampled elements each: 2020 Residential, 2022 rst_basic, 2026 Facades, 2026 Site); uv containers (list vs tuple) are not compared.
-  Corpus run of the current release: remote-host (tests/h1_suite.sh mesh refvol params).
+## Differential status (reference = pure Python, released build, remote-host logs 2026-10-13)
+Zero differences in every completed comparison. Files that did not finish are those whose pure-Python reference itself exceeds the per-file memory cap on the shared remote-host slice (2 GB).
+| suite | main corpus (78 files, 2017-2026) | extra samples (24 files: projects 2011-2022, families 2016-2026) |
+|---|---|---|
+| extraction want_all (records + headers, types, key order, float bits) | 73 identical, 5 not run (rme_advanced, memory) | 22 identical, 2 not run (2011 Nanjing, 2020 HYPERLOOP) |
+| extraction default / slim (subset of the corpus) | 26 / 25 identical | - |
+| channel-103 index + records | 78 identical | 24 identical |
+| parameters (73 files at the 2026-10-12 21:30 reference) | 73 identical, 5 not run (rme) | 22 identical, 2 not run |
+| element meshes (sampled 300 per file, bit-identical incl. per-triangle material) | 25 of 26 sampled files identical | 23 of 24 |
+| refined_volume (to 1e-9) | 25 of 26 | 23 of 24 |
+Not run = to be repeated with a 4 GB cap when the slice is idle (`tests/h1_suite.sh`, `FILE_MEM=4G`); locally (remote-host) the same code is bit-identical on 2020 Residential, 2022 rst_basic, 2026 Facades and Site samples, and extraction of 2020 rme_advanced / 2021 rme_advanced verified for peak memory (2.8 / 1.8 GB).
+* Params mirror the reference of 2026-10-12 21:30; a newer rvt_params.py runs the reference loop with the Rust kernels (drift guard).
+* Meshes mirror rvt_mesh / rvt_elemmesh of 2026-10-13 (morning); newer edits are ported as they are logged (PYTHON_REFERENCE_CHANGES.md).
+* Cross-machine: the reference is not bit-reproducible across CPUs (numpy SIMD): remote-host lines marked "geometrically equivalent" are the reference varying, not the port.
 * refined_volume (Rust) vs reference: equal to 1e-9 relative (tests/diff_refvol.py).
 * Not supported by the Rust mesh path: the reference's experimental RVT_STRIP mode.
 * Cross-machine note: the Python reference is not bit-reproducible across CPUs (numpy 2.5.4 SIMD paths): on 2018 rst_basic the reference on remote-host (i7-7700K) differs from
