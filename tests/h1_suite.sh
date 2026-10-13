@@ -8,8 +8,12 @@ SNAP=$(mktemp -d /tmp/rvtfast.XXXXXX); cp python/rvt_fast.py python/rvt_core.abi
 export RVT_FAST_DIR="$SNAP" RVT_CORE_NOCACHE=1 RVT_WORKERS=1 RVT_THREADS=4
 PY=${PY:-python}
 L=$HOME/h1logs/rvt-core; mkdir -p $L
-ALL=$(ls -Sr $HOME/rvt-research/corpus/*/*)
-SUB=$(ls -Sr $HOME/rvt-research/corpus/*/* | awk 'NR % 3 == 1')
+if [ -n "$EXTRA" ]; then   # EXTRA=1: the older project samples (2011-2022) and the family files (2016-2026); logs get an x_ prefix
+  ALL=$(ls -Sr $HOME/rvt-research/samples/* $HOME/rvt-research/samples-rfa/*); SUB=$ALL; P=x_
+else
+  ALL=$(ls -Sr $HOME/rvt-research/corpus/*/*)
+  SUB=$(ls -Sr $HOME/rvt-research/corpus/*/* | awk 'NR % 3 == 1')
+fi
 run1() {  # suite log file args...
   local log=$1 f=$2; shift 2
   grep -q "^$(basename "$f" | cut -c1-40)" "$log" 2>/dev/null && return 0
@@ -18,7 +22,7 @@ run1() {  # suite log file args...
   return 0
 }
 for s in "$@"; do
-  log=$L/h1_$s.log
+  log=$L/h1_$P$s.log
   case $s in
     extract_all) for f in $ALL; do run1 $log $f tests/diff_extract.py --want-all; done ;;
     extract_default) for f in $SUB; do run1 $log $f tests/diff_extract.py --default; done ;;
@@ -29,5 +33,5 @@ for s in "$@"; do
     refvol) for f in $SUB; do run1 $log $f tests/diff_refvol.py; done ;;
   esac
   ok=$(grep -cE 'IDENTICAL|  OK$' $log); fl=$(grep -cE 'FAILED rc|^FAIL ' $log); n=$(grep -cvE '^  ' $log)
-  echo "$s done $(date +%H:%M): $ok ok, $fl failed, $((n - ok - fl)) DIFFERENT" >> $L/h1_summary.log
+  echo "$P$s done $(date +%H:%M): $ok ok, $fl failed, $((n - ok - fl)) DIFFERENT" >> $L/h1_summary.log
 done
