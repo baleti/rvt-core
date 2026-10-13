@@ -27,6 +27,11 @@ pub struct EMesh {
     pub mkeys: Vec<(Val, Val)>,
 }
 
+/// rvt_elemmesh._sty: graphics style key for duplicate-body merging (built-in styles below 1000 behave like no style)
+fn sty(kk: &K, g: &Val) -> i128 {
+    match node_style(kk, g).as_int() { Some(v) => if v < 1000 || v >= 1i128 << 63 || v == 0xFFFF_FFFF { -1 } else { v }, None => -1 }
+}
+
 /// rvt_elemmesh._node_style
 fn node_style(kk: &K, g: &Val) -> Val {
     match dget(g, kk.k("m_GInfo")) { Some(gi) if truthy(gi) => dget(gi, kk.k("m_categoryId")).cloned().unwrap_or(Val::None), _ => Val::None }
@@ -256,7 +261,7 @@ impl Ctx {
                         for q in &pts { for k in 0..3 { mn[k] = mn[k].min(q[k]); mx[k] = mx[k].max(q[k]); } }
                         let r3 = |v: V3| [((v[0] * 1000.0).round_ties_even() / 1000.0 + 0.0).to_bits(), ((v[1] * 1000.0).round_ties_even() / 1000.0 + 0.0).to_bits(), ((v[2] * 1000.0).round_ties_even() / 1000.0 + 0.0).to_bits()];
                         let flat: Vec<f64> = pts.iter().flat_map(|q| [q[0].abs(), q[1].abs(), q[2].abs()]).collect();
-                        let sg = (p.0.len(), r3(mn), r3(mx), format!("{:.2}", np_sum(&flat)), format!("{:?}", node_style(kk, geos[p.3 as usize])));
+                        let sg = (p.0.len(), r3(mn), r3(mx), format!("{:.2}", np_sum(&flat)), sty(kk, geos[p.3 as usize]).to_string());
                         seen.insert(sg)
                     });
                     own = per.iter().flat_map(|p| p.0.iter().copied()).collect();
