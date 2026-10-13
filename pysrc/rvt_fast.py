@@ -685,11 +685,14 @@ class Model:
     def full(s):
         import gc
         on_ = gc.isenabled(); gc.disable()
-        try: x, p = s._full()
+        frz = not os.environ.get('RVT_CORE_NOFREEZE')
+        try:
+            x, p = s._full()
+            # the model is millions of long-lived acyclic objects: move them out of the collector's generations BEFORE re-enabling it
+            # (else the first allocation afterwards triggers a pass that rescans them all, ~0.3-0.8 s)
+            if frz: gc.freeze()
         finally:
             if on_: gc.enable()
-        # the model is millions of long-lived acyclic objects: move them out of the collector's generations (else the next passes rescan them all, ~0.3-0.8 s)
-        if not os.environ.get('RVT_CORE_NOFREEZE'): gc.freeze()
         return x, p
     def _full(s):
         import rvt_decode as D

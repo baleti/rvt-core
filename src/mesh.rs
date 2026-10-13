@@ -1676,10 +1676,58 @@ pub fn refine_curved(verts: &[UV], idx: &[u32], ev: &Surf, rel_tol: f64, abs_tol
     let mut p: Vec<V3> = v.iter().map(|q| ev.eval(q[0], q[1])).collect();
     let (mut lo, mut hi) = (p[0], p[0]);
     for q in &p { for k in 0..3 { lo[k] = lo[k].min(q[k]); hi[k] = hi[k].max(q[k]); } }
-    let tol = abs_tol.max(rel_tol * norm(sub(hi, lo)));
+    let mut tol = abs_tol.max(rel_tol * norm(sub(hi, lo)));
     let nloop = v.len();
+    // the loop's own chord error: refining the interior beyond it adds triangles, not fidelity
+    let mut bdev = 0.0f64;
+    for i in 0..nloop {
+        let j = (i + 1) % nloop;
+        let m = [(v[i][0] + v[j][0]) / 2.0, (v[i][1] + v[j][1]) / 2.0];
+        let c = add(p[i], p[j]);
+        bdev = bdev.max(norm(sub(ev.eval(m[0], m[1]), [c[0] / 2.0, c[1] / 2.0, c[2] / 2.0])));
+    }
+    tol = tol.max(bdev);
     let ek = |a: usize, b: usize| -> (usize, usize) { (a.min(b), a.max(b)) };
     let bnd: FxHashSet<(usize, usize)> = (0..nloop).map(|i| ek(i, (i + 1) % nloop)).collect();
+    let dev = |v: &Vec<UV>, p: &Vec<V3>, i: usize, j: usize| -> f64 {
+        let m = [(v[i][0] + v[j][0]) / 2.0, (v[i][1] + v[j][1]) / 2.0];
+        let c = add(p[i], p[j]);
+        norm(sub(ev.eval(m[0], m[1]), [c[0] / 2.0, c[1] / 2.0, c[2] / 2.0]))
+    };
+    // 1) edge flips (no new vertices): an interior diagonal of a uv-convex quad is replaced by the other diagonal when that one deviates less
+    let cr = |v: &Vec<UV>, o: usize, a: usize, b: usize| -> f64 { (v[a][0] - v[o][0]) * (v[b][1] - v[o][1]) - (v[a][1] - v[o][1]) * (v[b][0] - v[o][0]) };
+    for _fp in 0..8 {
+        let mut eorder: Vec<(usize, usize)> = vec![];
+        let mut em: FxHashMap<(usize, usize), Vec<usize>> = FxHashMap::default();
+        for (ti, tr) in t.iter().enumerate() {
+            for k in 0..3 {
+                let e = ek(tr[k], tr[(k + 1) % 3]);
+                let l = em.entry(e).or_default();
+                if l.is_empty() { eorder.push(e); }
+                l.push(ti);
+            }
+        }
+        let mut flipped = 0;
+        let mut used: FxHashSet<usize> = FxHashSet::default();
+        for e in &eorder {
+            let ts = &em[e];
+            if bnd.contains(e) || ts.len() != 2 || used.contains(&ts[0]) || used.contains(&ts[1]) { continue; }
+            let (i, j) = *e;
+            let (t1, t2) = (t[ts[0]], t[ts[1]]);
+            let cs: Vec<usize> = t1.iter().copied().filter(|q| *q != i && *q != j).collect();
+            let ds: Vec<usize> = t2.iter().copied().filter(|q| *q != i && *q != j).collect();
+            if cs.len() != 1 || ds.len() != 1 { continue; }
+            let (c, d) = (cs[0], ds[0]);
+            if em.contains_key(&ek(c, d)) { continue; }
+            if cr(&v, i, j, c) * cr(&v, i, j, d) >= 0.0 || cr(&v, c, d, i) * cr(&v, c, d, j) >= 0.0 { continue; }
+            if dev(&v, &p, c, d) + 1e-12 >= dev(&v, &p, i, j) { continue; }
+            let [mut a, mut b, mut cc] = t1;
+            for _ in 0..3 { if (a == i && b == j) || (a == j && b == i) { break; } let o = a; a = b; b = cc; cc = o; }
+            t[ts[0]] = [a, d, cc]; t[ts[1]] = [d, b, cc];
+            used.insert(ts[0]); used.insert(ts[1]); flipped += 1;
+        }
+        if flipped == 0 { break; }
+    }
     for _pass in 0..12 {
         if t.len() >= max_tris { break; }
         let mut eorder: Vec<(usize, usize)> = vec![];
