@@ -2,7 +2,7 @@
 
 ## State
 * Released build (imported live by the reader hooks and rvt-viewer): `python/rvt_core.abi3.so` + `python/rvt_fast.py` + `python/rvt_viewer_fast.py`, .so also in `~/rvt-research/rvt_core.abi3.so`.
-  Sources: `src/*.rs`, `pysrc/*.py`. `./build.sh` -> `dev/`, `./release.sh` (smoke diffs incl. params + cache round trip) -> `python/`. Then ALWAYS the demo smoke:
+  Sources: `src/*.rs`, `pysrc/*.py`. `./build.sh` -> `dev/`, `./release.sh` (smoke diffs incl. params + cache round trip) -> `python/`. Then ALWAYS `tests/demo_smoke_all.sh` (the three DEMO.md files); single-file form:
   `(cd ~/src/rvt-viewer && sh tools/demo_smoke.sh ~/rvt-research/corpus/2022/30_rst_basic_sample_project.rvt 8990)`.
 * Mirrors the reference as of 2026-10-13 04:40 (rvt_mesh / rvt_elemmesh incl. refine_curved flips, whole-body rule, per-triangle mat) and rvt_params of 2026-10-12 21:30
   (drift guard: any other rvt_params.py runs the reference loop with Rust kernels). Check with `tests/oracle_watch.sh` (snapshot in logs/snap; `--accept` after porting).
