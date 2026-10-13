@@ -237,6 +237,12 @@ impl Ctx {
                         let m: Vec<Meta> = ix.iter().map(|&i| ownm[i].clone()).collect();
                         let f: Vec<i64> = ix.iter().map(|&i| ownf[i]).collect();
                         let (st, sm, ok, lf) = select_closed_shell(&t, &m, &f, Some(&ownp));
+                        // a small closed sub-shell of a large nearly-closed body: the body is the solid when it holds clearly more volume
+                        if ok && (st.len() as f64) < 0.5 * ix.len() as f64 && nearly_closed(&t, 0.06, 40) {
+                            let vw = crate::refvol::volume_one(&t, &m, &f, ec);
+                            let vs = crate::refvol::volume_one(&st, &sm, lf.as_deref().unwrap_or(&[]), ec);
+                            if vw > 1.5 * vs { per.push((t, m, f, *g)); continue; }
+                        }
                         if ok { per.push((st, sm, lf.unwrap(), *g)); }
                         else if nearly_closed(&t, 0.06, 40) { per.push((t, m, f, *g)); }        // trimmed curved faces whose boundary samples do not weld exactly
                     }
@@ -630,4 +636,14 @@ pub fn refined_volume(py: Python<'_>, tris: Vec<[[f64; 3]; 3]>, meta: &Bound<'_,
         let np = py.import_bound("numpy")?;
         Ok((v, c, a, np.getattr("array")?.call1((cen.to_vec(),))?).into_py(py))
     } else { Ok((v, c, a).into_py(py)) }
+}
+
+/// test entry: rvt_mesh.refine_curved(verts, idx, ev) with ev a SurfEval -> (verts, triangles)
+#[pyfunction]
+#[pyo3(signature = (verts, idx, ev, rel_tol=5e-3, abs_tol=0.0033, max_tris=2000))]
+pub fn refine_curved_dbg(verts: Vec<(f64, f64)>, idx: Vec<u32>, ev: &Bound<'_, SurfEval>, rel_tol: f64, abs_tol: f64, max_tris: usize) -> PyResult<(Vec<(f64, f64)>, Vec<[usize; 3]>)> {
+    let s = ev.borrow().s.clone().ok_or_else(|| pyo3::exceptions::PyValueError::new_err("no surface"))?;
+    let v: Vec<UV> = verts.iter().map(|p| [p.0, p.1]).collect();
+    let (nv, t) = refine_curved(&v, &idx, &s, rel_tol, abs_tol, max_tris);
+    Ok((nv.iter().map(|p| (p[0], p[1])).collect(), t))
 }

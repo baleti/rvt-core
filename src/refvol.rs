@@ -194,3 +194,166 @@ pub fn refined_volume(tris: &[Tri], meta: &[Meta], levels: i32, tol: f64, fid: O
     let cen = if vol != 0.0 { [csum[0] / vol + off[0], csum[1] / vol + off[1], csum[2] / vol + off[2]] } else { off };
     Ok((vol.abs(), closed, area, cen))
 }
+
+/// rvt_mesh.mesh_volume(tris, tol) -> (volume, closed, n_open_edges, area)
+pub fn mesh_volume(tris: &[Tri], tol: f64) -> (f64, bool, usize, f64) {
+    if tris.is_empty() { return (0.0, false, 0, 0.0); }
+    let mut vid: FxHashMap<K3, usize> = FxHashMap::default();
+    let mut vp: Vec<V3> = vec![];
+    let mut tt: Vec<[usize; 3]> = vec![];
+    for t in tris {
+        let mut ids = [0usize; 3];
+        for i in 0..3 { let n = vid.len(); ids[i] = *vid.entry(key(t[i], tol)).or_insert_with(|| { vp.push(t[i]); n }); }
+        if ids[0] != ids[1] && ids[1] != ids[2] && ids[0] != ids[2] { tt.push(ids); }
+    }
+    for t in tris { for p in t { vp[vid[&key(*p, tol)]] = *p; } }
+    let mut em = EdgeMap { idx: FxHashMap::default(), lists: vec![], keys: vec![] };
+    for (k, t) in tt.iter().enumerate() {
+        for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+            let e = (a.min(b), a.max(b));
+            let i = *em.idx.entry(e).or_insert_with(|| { em.lists.push(vec![]); em.keys.push(e); em.lists.len() - 1 });
+            em.lists[i].push((k, a, b));
+        }
+    }
+    let mut de: FxHashMap<(usize, usize), usize> = FxHashMap::default();
+    for t in &tt { for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] { *de.entry((a, b)).or_insert(0) += 1; } }
+    if !tt.is_empty() && de.iter().all(|((a, b), c)| de.get(&(*b, *a)).copied().unwrap_or(0) == *c) {
+        let v: Vec<f64> = tt.iter().map(|t| dot(vp[t[0]], cross(vp[t[1]], vp[t[2]]))).collect();
+        let vol = np_sum(&v) / 6.0;
+        if vol > 0.0 {
+            let ar: Vec<f64> = tt.iter().map(|t| norm(cross(sub(vp[t[1]], vp[t[0]]), sub(vp[t[2]], vp[t[0]])))).collect();
+            return (vol, true, 0, np_sum(&ar) / 2.0);
+        }
+    }
+    let n = tt.len();
+    let mut flip: Vec<Option<bool>> = vec![None; n];
+    for s0 in 0..n {
+        if flip[s0].is_some() { continue; }
+        flip[s0] = Some(false);
+        let mut stack = vec![s0];
+        while let Some(k) = stack.pop() {
+            let mut t = tt[k];
+            if flip[k] == Some(true) { t = [t[0], t[2], t[1]]; }
+            for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+                let l = em.get((a.min(b), a.max(b)));
+                if l.len() != 2 { continue; }
+                for &(k2, a2, b2) in l {
+                    if k2 == k || flip[k2].is_some() { continue; }
+                    flip[k2] = Some(a2 == a && b2 == b); stack.push(k2);
+                }
+            }
+        }
+    }
+    let (mut vol, mut area) = (0.0, 0.0);
+    for (k, t) in tt.iter().enumerate() {
+        let (p0, mut p1, mut p2) = (vp[t[0]], vp[t[1]], vp[t[2]]);
+        if flip[k] == Some(true) { std::mem::swap(&mut p1, &mut p2); }
+        vol += dot(p0, cross(p1, p2)) / 6.0; area += norm(cross(sub(p1, p0), sub(p2, p0))) / 2.0;
+    }
+    let open = em.lists.iter().filter(|l| l.len() != 2).count();
+    (vol.abs(), open == 0, open, area)
+}
+
+/// eigenvalues (descending) and eigenvectors of a symmetric 3x3 matrix (Jacobi)
+fn eig3(mut a: [[f64; 3]; 3]) -> ([f64; 3], [V3; 3]) {
+    let mut v = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    for _ in 0..64 {
+        let (mut p, mut q, mut big) = (0, 1, a[0][1].abs());
+        if a[0][2].abs() > big { p = 0; q = 2; big = a[0][2].abs(); }
+        if a[1][2].abs() > big { p = 1; q = 2; big = a[1][2].abs(); }
+        if big < 1e-300 { break; }
+        let th = (a[q][q] - a[p][p]) / (2.0 * a[p][q]);
+        let t = if th >= 0.0 { 1.0 / (th + (th * th + 1.0).sqrt()) } else { -1.0 / (-th + (th * th + 1.0).sqrt()) };
+        let c = 1.0 / (t * t + 1.0).sqrt(); let s = t * c;
+        let mut b = a;
+        for k in 0..3 { b[p][k] = c * a[p][k] - s * a[q][k]; b[q][k] = s * a[p][k] + c * a[q][k]; }
+        let a2 = b;
+        for k in 0..3 { b[k][p] = c * a2[k][p] - s * a2[k][q]; b[k][q] = s * a2[k][p] + c * a2[k][q]; }
+        a = b;
+        for k in 0..3 { let (vp_, vq) = (v[k][p], v[k][q]); v[k][p] = c * vp_ - s * vq; v[k][q] = s * vp_ + c * vq; }
+    }
+    let mut idx = [0usize, 1, 2];
+    idx.sort_by(|&i, &j| a[j][j].partial_cmp(&a[i][i]).unwrap_or(std::cmp::Ordering::Equal));
+    let ev = [a[idx[0]][idx[0]], a[idx[1]][idx[1]], a[idx[2]][idx[2]]];
+    let vec = idx.map(|i| [v[0][i], v[1][i], v[2][i]]);
+    (ev, vec)
+}
+
+/// singular values (descending) and right singular vectors of the centred point set (np.linalg.svd(P - mean))
+fn svd_centred(p: &[V3]) -> ([f64; 3], [V3; 3], V3) {
+    let n = p.len() as f64;
+    let mut c = [0.0; 3];
+    for q in p { for k in 0..3 { c[k] += q[k]; } }
+    c = [c[0] / n, c[1] / n, c[2] / n];
+    let mut m = [[0.0; 3]; 3];
+    for q in p { let d = sub(*q, c); for i in 0..3 { for j in 0..3 { m[i][j] += d[i] * d[j]; } } }
+    let (ev, vec) = eig3(m);
+    (ev.map(|x| x.max(0.0).sqrt()), vec, c)
+}
+
+/// rvt_mesh.heal_open(tris, tol) -> (tris, n_caps, healed_all)
+pub fn heal_open(tris: &[Tri], tol: f64, earcut: Earcut) -> (Vec<Tri>, usize, bool) {
+    let mut pts: FxHashMap<K3, V3> = FxHashMap::default();
+    let mut eorder: Vec<(K3, K3)> = vec![];
+    let mut em: FxHashMap<(K3, K3), Vec<(K3, K3)>> = FxHashMap::default();
+    for t in tris {
+        let ks = [key(t[0], tol), key(t[1], tol), key(t[2], tol)];
+        for i in 0..3 { pts.insert(ks[i], t[i]); }
+        for (a, b) in [(0, 1), (1, 2), (2, 0)] {
+            if ks[a] != ks[b] {
+                let e = if ks[a] <= ks[b] { (ks[a], ks[b]) } else { (ks[b], ks[a]) };
+                let l = em.entry(e).or_default();
+                if l.is_empty() { eorder.push(e); }
+                l.push((ks[a], ks[b]));
+            }
+        }
+    }
+    let bnd: Vec<(K3, K3)> = eorder.iter().filter(|e| em[e].len() == 1).map(|e| em[e][0]).collect();
+    if bnd.is_empty() { return (tris.to_vec(), 0, true); }
+    let mut nxt: FxHashMap<K3, Vec<K3>> = FxHashMap::default();
+    for (a, b) in &bnd { nxt.entry(*a).or_default().push(*b); }
+    let mut used: rustc_hash::FxHashSet<(K3, K3)> = Default::default();
+    let mut loops: Vec<Vec<K3>> = vec![];
+    for (a, b) in &bnd {
+        if used.contains(&(*a, *b)) { continue; }
+        let mut lp = vec![*a]; let mut cur = *b; used.insert((*a, *b)); let mut guard = 0;
+        while cur != *a && guard < 10000 {
+            guard += 1;
+            let cand = nxt.get(&cur).and_then(|l| l.iter().find(|c| !used.contains(&(cur, **c))).copied());
+            let c = match cand { Some(c) => c, None => break };
+            used.insert((cur, c)); lp.push(cur); cur = c;
+        }
+        if cur == *a && lp.len() >= 3 { loops.push(lp); } else { return (tris.to_vec(), 0, false); }
+    }
+    let mut out = tris.to_vec(); let mut caps = 0;
+    for lp in &loops {
+        let p: Vec<V3> = lp.iter().map(|k| pts[k]).collect();
+        let (s, vt, c) = svd_centred(&p);
+        if s[2] > 1e-4 * s[0].max(1e-9) + 1e-6 { return (tris.to_vec(), 0, false); }
+        let uv: Vec<UV> = p.iter().map(|q| { let d = sub(*q, c); [dot(d, vt[0]), dot(d, vt[1])] }).collect();
+        let ends = [uv.len() as u32];
+        let r = earcut(&[(&uv, &ends)]);
+        let idx = match r.into_iter().next().flatten() { Some(i) => i, None => return (tris.to_vec(), 0, false) };
+        for k in (0..idx.len() / 3 * 3).step_by(3) { out.push([p[idx[k] as usize], p[idx[k + 1] as usize], p[idx[k + 2] as usize]]); }
+        caps += 1;
+    }
+    (out, caps, true)
+}
+
+/// rvt_mesh.volume_by_node(tris, meta, [0] * n, fid=fid)[0]: one body
+pub fn volume_one(tris: &[Tri], meta: &[Meta], fid: &[i64], earcut: Earcut) -> f64 {
+    if tris.is_empty() { return 0.0; }
+    let refinable = meta.len() == tris.len() && meta.iter().all(|m| !matches!(m.ev, MetaEv::None) || m.kind == "plane");
+    let (mut v, mut c) = if refinable {
+        match refined_volume(tris, meta, 3, 5e-5, Some(fid)) { Ok(r) => (r.0, r.1), Err(_) => { let r = mesh_volume(tris, 5e-5); (r.0, r.1) } }
+    } else { let r = mesh_volume(tris, 5e-5); (r.0, r.1) };
+    if !c {
+        let p: Vec<V3> = tris.iter().flat_map(|t| t.iter().copied()).collect();
+        let (s, _, _) = svd_centred(&p);
+        if s[2] < 1e-6 * s[0].max(1e-9) { return 0.0; }
+        let (t2, ncap, okh) = heal_open(tris, 5e-5, earcut);
+        if okh && ncap > 0 { let r = mesh_volume(&t2, 5e-5); if r.1 { v = r.0; c = true; } }
+    }
+    let _ = c;
+    v
+}

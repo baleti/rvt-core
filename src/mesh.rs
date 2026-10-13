@@ -1303,7 +1303,7 @@ pub fn tessellate(kk: &K, faces: &[&Val], edges: &EdgeMap, earcut: Earcut) -> Rs
                 let mut idx = match r { Some(i) => i, None => { out.unsup.push("earcut"); continue; } };
                 // curved face (general loop path, single loop): the emitted triangles must follow the surface (reference: _rect_grid / refine_curved)
                 if !drop_degenerate && kind.name() != "plane" && ends.len() == 1 && std::env::var_os("RVT_NOREFINE").map_or(true, |x| x.is_empty()) {
-                    let (nv, tl) = match rect_grid(&verts, &ev, 48) { Some(g) => g, None => refine_curved(&verts, &idx, &ev, 2e-3, 1e-3, 4000) };
+                    let (nv, tl) = match rect_grid(&verts, &ev, 48) { Some(g) => g, None => refine_curved(&verts, &idx, &ev, refine_rel(), 0.0033, 2000) };
                     verts = nv;
                     idx = tl.iter().flat_map(|x| [x[0] as u32, x[1] as u32, x[2] as u32]).collect();
                 }
@@ -1733,7 +1733,14 @@ pub fn refine_curved(verts: &[UV], idx: &[u32], ev: &Surf, rel_tol: f64, abs_tol
             }
         }
         t = newt.into_iter().enumerate().filter(|(i, _)| !drop.contains(i)).map(|(_, x)| x).collect();
+        if std::env::var_os("RVT_REFINE_TRACE").is_some() { eprintln!("pass {} tris {} verts {} drop {} tol {}", _pass, t.len(), v.len(), drop.len(), tol); }
         if !changed { break; }
     }
     (v, t)
+}
+
+/// rvt_mesh.refine_curved default rel_tol: float(os.environ.get("RVT_REFINE_REL", 5e-3)) (read once, like the reference's default argument at import)
+fn refine_rel() -> f64 {
+    static R: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *R.get_or_init(|| std::env::var("RVT_REFINE_REL").ok().and_then(|s| s.trim().parse::<f64>().ok()).unwrap_or(5e-3))
 }
