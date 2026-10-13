@@ -67,6 +67,33 @@ pub fn refined_volume(tris: &[Tri], meta: &[Meta], levels: i32, tol: f64, fid: O
                 }
             }
         }
+        // absolute sign of every BFS component from the surfaces' own normals (su x sv points out of the solid): each face votes with up to 3 triangles
+        let mut aorder: Vec<i64> = vec![];
+        let mut ag: FxHashMap<i64, Vec<i32>> = FxHashMap::default();
+        for (k, &ti) in keep.iter().enumerate() {
+            let f = fk[k];
+            if ag.get(&f).map_or(false, |l| l.len() >= 3) { continue; }
+            let m = &meta[ti];
+            let ev = match &m.ev { MetaEv::S(s) => s.clone(), _ => continue };
+            let uv = match &m.uv { Some(u) => *u, None => continue };
+            let t = &tris[ti];
+            let nt = cross(sub(t[1], t[0]), sub(t[2], t[0]));
+            if norm(nt) < 1e-14 { continue; }
+            let (u, v) = ((uv[0][0] + uv[1][0] + uv[2][0]) / 3.0, (uv[0][1] + uv[1][1] + uv[2][1]) / 3.0);
+            let h = 1e-5;
+            let ns = cross(sub(ev.eval(u + h, v), ev.eval(u - h, v)), sub(ev.eval(u, v + h), ev.eval(u, v - h)));
+            if norm(ns) < 1e-14 { continue; }
+            let l = ag.entry(f).or_default();
+            if l.is_empty() { aorder.push(f); }
+            l.push(if dot(nt, ns) > 0.0 { 1 } else { -1 });
+        }
+        let mut votes: FxHashMap<i64, i64> = FxHashMap::default();
+        for f in &aorder {
+            let sg: i64 = if ag[f].iter().map(|x| *x as i64).sum::<i64>() >= 0 { 1 } else { -1 };
+            *votes.entry(fc[f]).or_insert(0) += if !ff[f] { sg } else { -sg };
+        }
+        let keys: Vec<i64> = ff.keys().copied().collect();
+        for f in keys { if votes.get(&fc[&f]).copied().unwrap_or(0) < 0 { let x = ff[&f]; ff.insert(f, !x); } }
         flip = fk.iter().map(|f| Some(ff[f])).collect();
         comp = fk.iter().map(|f| fc[f]).collect();
     }

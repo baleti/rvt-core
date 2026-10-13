@@ -238,13 +238,13 @@ impl Ctx {
                         let f: Vec<i64> = ix.iter().map(|&i| ownf[i]).collect();
                         let (st, sm, ok, lf) = select_closed_shell(&t, &m, &f, Some(&ownp));
                         // a small closed sub-shell of a large nearly-closed body: the body is the solid when it holds clearly more volume
-                        if ok && (st.len() as f64) < 0.5 * ix.len() as f64 && nearly_closed(&t, 0.06, 40) {
+                        if ok && (st.len() as f64) < 0.5 * ix.len() as f64 && nearly_closed(&t, 0.12, 40) {
                             let vw = crate::refvol::volume_one(&t, &m, &f, ec);
                             let vs = crate::refvol::volume_one(&st, &sm, lf.as_deref().unwrap_or(&[]), ec);
                             if vw > 1.5 * vs { per.push((t, m, f, *g)); continue; }
                         }
                         if ok { per.push((st, sm, lf.unwrap(), *g)); }
-                        else if nearly_closed(&t, 0.06, 40) { per.push((t, m, f, *g)); }        // trimmed curved faces whose boundary samples do not weld exactly
+                        else if nearly_closed(&t, 0.12, 40) { per.push((t, m, f, *g)); }        // trimmed curved faces whose boundary samples do not weld exactly
                     }
                 }
                 if !per.is_empty() {
