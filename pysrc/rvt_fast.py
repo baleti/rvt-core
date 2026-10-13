@@ -129,6 +129,7 @@ def _extract(path, extra, only_ids, want_all, slim, two_stage=False):
                 try: got = rd.cache_load(cfn)
                 except Exception: got = None
                 finally:
+                    if not os.environ.get('RVT_CORE_NOFREEZE'): gc.freeze()      # the cached model: kept out of later collector passes
                     if gc_was: gc.enable()
                 if got is not None:
                     x = dict(eh=got[1], recs=got[0], W=W, sch=sch)
@@ -143,6 +144,7 @@ def _extract(path, extra, only_ids, want_all, slim, two_stage=False):
     try:
         ok = _partitions(o, rd, wl, EH, oid, slim_tags, recs, eh, T)
     finally:
+        if not os.environ.get('RVT_CORE_NOFREEZE'): gc.freeze()          # the decoded model: millions of long-lived acyclic objects, kept out of later collector passes
         if gc_was: gc.enable()
     if cfn and ok:
         try: os.makedirs(CACHE, exist_ok=True); rd.cache_write(cfn, hdr)
