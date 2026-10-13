@@ -2,7 +2,7 @@
 //! and mapped through its surface). Same traversal orders as the reference; sums are plain sequential sums, so results agree with the reference to
 //! rounding (tests/diff_refvol.py), not bit for bit.
 use crate::mesh::*;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 type K3 = (i64, i64, i64);
 
@@ -383,4 +383,52 @@ pub fn volume_one(tris: &[Tri], meta: &[Meta], fid: &[i64], earcut: Earcut) -> f
     }
     let _ = c;
     v
+}
+
+/// per-body numbers of build.body_summary: vertices welded at 1e-4 (numpy round of x * 1e4, half even), edge parity per body
+/// -> (rows (id, triangles, distinct fid count, area, odd edges, sum of cross products, lo, hi), body index per triangle (-1 = beyond the limit))
+pub fn body_summary_core(p: &[f64], nid: &[i64], fid: Option<&[i64]>, limit: usize) -> (Vec<(i64, usize, Option<usize>, f64, bool, V3, V3, V3)>, Vec<i8>) {
+    let n = p.len() / 9;
+    let mut bodies: Vec<i64> = nid.to_vec();
+    bodies.sort(); bodies.dedup(); bodies.truncate(limit);
+    let tb: Vec<i8> = nid.iter().map(|x| bodies.binary_search(x).map(|i| i as i8).unwrap_or(-1)).collect();
+    let mut vid: FxHashMap<(i64, i64, i64), u32> = FxHashMap::default();
+    let mut ids: Vec<[u32; 3]> = Vec::with_capacity(n);
+    for t in 0..n {
+        let mut r = [0u32; 3];
+        for k in 0..3 {
+            let q = &p[t * 9 + k * 3..t * 9 + k * 3 + 3];
+            let key = ((q[0] * 1e4).round_ties_even() as i64, (q[1] * 1e4).round_ties_even() as i64, (q[2] * 1e4).round_ties_even() as i64);
+            let nv = vid.len() as u32;
+            r[k] = *vid.entry(key).or_insert(nv);
+        }
+        ids.push(r);
+    }
+    let nb = bodies.len();
+    let mut ec: FxHashMap<(i8, u32, u32), u32> = FxHashMap::default();
+    for (t, r) in ids.iter().enumerate() {
+        let b = tb[t];
+        if b < 0 { continue; }
+        for (a, c) in [(r[0], r[1]), (r[1], r[2]), (r[2], r[0])] { *ec.entry((b, a.min(c), a.max(c))).or_insert(0) += 1; }
+    }
+    let mut odd = vec![false; nb];
+    for (k, c) in &ec { if c % 2 == 1 { odd[k.0 as usize] = true; } }
+    let mut rows = vec![];
+    for (k, &b) in bodies.iter().enumerate() {
+        let (mut cnt, mut cs, mut lo, mut hi) = (0usize, [0.0; 3], [f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        let mut areas: Vec<f64> = vec![];
+        let mut fs: FxHashSet<i64> = FxHashSet::default();
+        for t in 0..n {
+            if tb[t] as usize != k || tb[t] < 0 { continue; }
+            cnt += 1;
+            let q = |i: usize| -> V3 { [p[t * 9 + i * 3], p[t * 9 + i * 3 + 1], p[t * 9 + i * 3 + 2]] };
+            let c = cross(sub(q(1), q(0)), sub(q(2), q(0)));
+            areas.push(norm(c) / 2.0);
+            for j in 0..3 { cs[j] += c[j]; }
+            for i in 0..3 { let v = q(i); for j in 0..3 { lo[j] = lo[j].min(v[j]); hi[j] = hi[j].max(v[j]); } }
+            if let Some(f) = fid { fs.insert(f[t]); }
+        }
+        rows.push((b, cnt, fid.map(|_| fs.len()), np_sum(&areas), odd[k], cs, lo, hi));
+    }
+    (rows, tb)
 }

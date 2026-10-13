@@ -10,6 +10,7 @@ $PY tests/diff_extract.py --want-all $C/2022/30_rst_basic_sample_project.rvt
 $PY tests/diff_g103.py --n 100 $C/2022/30_rst_basic_sample_project.rvt
 $PY tests/diff_params.py $C/2022/30_rst_basic_sample_project.rvt
 $PY tests/diff_cache.py $C/2022/30_rst_basic_sample_project.rvt
+$PY tests/diff_bodysum.py $C/2022/30_rst_basic_sample_project.rvt 200
 $PY bench/mcmp.py $C/2022/30_rst_basic_sample_project.rvt 300 | tee /dev/stderr | grep -q "different 0"
 cp dev/rvt_core.abi3.so python/rvt_core.abi3.so.tmp && mv python/rvt_core.abi3.so.tmp python/rvt_core.abi3.so
 cp dev/rvt_fast.py python/rvt_fast.py.tmp && mv python/rvt_fast.py.tmp python/rvt_fast.py

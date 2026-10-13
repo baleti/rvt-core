@@ -58,3 +58,20 @@ def em_geometries(model, ids, chunk=128):
 
 def refined_volume(tris, meta, levels=3, tol=5e-5, centroid=False, fid=None):
     return RF.refined_volume(tris, meta, levels=levels, tol=tol, centroid=centroid, fid=fid)
+
+def body_summary(P, nid, fid=None, surf=None, limit=12):
+    """== rvtviewer.build.body_summary (per-body triangles, faces, area, watertight, bounds, surface kinds): welding / edge parity / sums in Rust"""
+    import numpy as np, collections
+    P = np.ascontiguousarray(np.asarray(P, float)).reshape(-1, 3)
+    nid = np.asarray(nid)
+    fid_ = [int(x) for x in fid] if fid is not None and len(fid) == len(nid) else None
+    rows, tb = RF._rc().body_summary_core(P.tobytes(), [int(x) for x in nid.tolist()], fid_, limit)
+    tb = np.frombuffer(tb, dtype=np.int8)
+    surfa = np.asarray(surf, dtype=object) if surf is not None and len(surf) == len(nid) else None
+    out = []
+    for k, (b, ntri, nfaces, area, odd, cs, lo, hi) in enumerate(rows):
+        closed = 'yes' if not odd else ('sealed' if float(np.linalg.norm(np.asarray(cs))) < 1e-4 * max(area, 1e-9) else 'open')
+        out.append({'id': int(b), 'kind': 'polymesh' if b == 10 ** 6 else ('symbol instance' if b >= 2 * 10 ** 7 else 'own geometry'), 'tris': int(ntri), 'faces': nfaces,
+                    'surfaces': dict(collections.Counter(surfa[tb == k].tolist())) if surfa is not None else None, 'area': round(area, 3), 'closed': closed,
+                    'lo': np.asarray(lo).round(3).tolist(), 'hi': np.asarray(hi).round(3).tolist()})
+    return out

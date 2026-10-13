@@ -649,3 +649,16 @@ pub fn refine_curved_dbg(verts: Vec<(f64, f64)>, idx: Vec<u32>, ev: &Bound<'_, S
     let (nv, t) = refine_curved(&v, &idx, &s, rel_tol, abs_tol, max_tris);
     Ok((nv.iter().map(|p| (p[0], p[1])).collect(), t))
 }
+
+/// build.body_summary numbers in Rust: (rows, body index per triangle as bytes); P = float64 little-endian bytes of n * 9 values (P.tobytes())
+#[pyfunction]
+#[pyo3(signature = (p, nid, fid=None, limit=12))]
+pub fn body_summary_core(py: Python<'_>, p: &[u8], nid: Vec<i64>, fid: Option<Vec<i64>>, limit: usize) -> PyResult<(Vec<(i64, usize, Option<usize>, f64, bool, [f64; 3], [f64; 3], [f64; 3])>, Py<PyBytes>)> {
+    if p.len() % 8 != 0 { return Err(pyo3::exceptions::PyValueError::new_err("P bytes")); }
+    let v: Vec<f64> = p.chunks_exact(8).map(|c| f64::from_le_bytes(c.try_into().unwrap())).collect();
+    if v.len() != nid.len() * 9 { return Err(pyo3::exceptions::PyValueError::new_err("P and nid lengths differ")); }
+    if let Some(f) = &fid { if f.len() != nid.len() { return Err(pyo3::exceptions::PyValueError::new_err("fid length")); } }
+    let (rows, tb) = py.allow_threads(|| crate::refvol::body_summary_core(&v, &nid, fid.as_deref(), limit));
+    let bytes: Vec<u8> = tb.iter().map(|x| *x as u8).collect();
+    Ok((rows, PyBytes::new_bound(py, &bytes).unbind()))
+}
