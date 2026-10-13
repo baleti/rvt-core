@@ -69,3 +69,6 @@ Per component, same machine (measured during development, single runs):
   Corpus run of the current release: remote-host (tests/h1_suite.sh mesh refvol params).
 * refined_volume (Rust) vs reference: equal to 1e-9 relative (tests/diff_refvol.py).
 * Not supported by the Rust mesh path: the reference's experimental RVT_STRIP mode.
+* Cross-machine note: the Python reference is not bit-reproducible across CPUs (numpy 2.5.4 SIMD paths): on 2018 rst_basic the reference on remote-host (i7-7700K) differs from
+  the reference on remote-host (i5-1245U) in 9 of 300 meshes (same triangles count / area / vertex set), while the Rust output is identical on both hosts and equal to
+  remote-host's reference. remote-host suite lines "geometrically equivalent" are this effect; bit-identity is checked on remote-host.
