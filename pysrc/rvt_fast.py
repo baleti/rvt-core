@@ -525,7 +525,7 @@ def _params_impl(path, x):
     return out
 
 # sha1 of the rvt_params.py whose params() loop _params_impl mirrors; any other version runs the reference loop (with the Rust kernels) instead
-PARAMS_PORTED = 'fc7a6feef8f40c2833ff0cd2f6ea582c5a93f159'
+PARAMS_PORTED = '71c16beb7b47e5d037273aa8e37d3e715537dadb'
 def _params_drift():
     import hashlib
     try: return hashlib.sha1(open(os.path.join(READER, 'rvt_params.py'), 'rb').read()).hexdigest() != PARAMS_PORTED
