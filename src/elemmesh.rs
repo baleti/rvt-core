@@ -630,7 +630,9 @@ pub fn refined_volume(py: Python<'_>, tris: Vec<[[f64; 3]; 3]>, meta: &Bound<'_,
         ms.push(Meta { kind, ev, uv });
     }
     if ms.len() != tris.len() { return Err(pyo3::exceptions::PyValueError::new_err("meta length")); }
-    let r = py.allow_threads(|| crate::refvol::refined_volume(&tris, &ms, levels, tol, fid.as_deref()));
+    if let Some(f) = &fid { if f.len() != tris.len() { return Err(pyo3::exceptions::PyValueError::new_err("fid length")); } }
+    let r = py.allow_threads(|| std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::refvol::refined_volume(&tris, &ms, levels, tol, fid.as_deref()))));
+    let r = r.map_err(|_| pyo3::exceptions::PyValueError::new_err("internal error (panic) in refined_volume: use the reference"))?;
     let (v, c, a, cen) = r.map_err(|_| pyo3::exceptions::PyValueError::new_err("evaluator raised in the reference path"))?;
     if centroid {
         let np = py.import_bound("numpy")?;

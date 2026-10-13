@@ -341,6 +341,9 @@ def refined_volume(tris, meta, levels=3, tol=5e-5, centroid=False, fid=None):
             return _rc().refined_volume(np.asarray([[np.asarray(p, float) for p in t] for t in tris], float).tolist(), list(meta), levels, tol, centroid, list(fid) if fid is not None else None)
         except NotImplementedError: pass
         except ValueError: pass                                  # the reference raises (or decides) on its own
+        except BaseException as ex:
+            if type(ex).__name__ != 'PanicException': raise
+            pass                                                 # a Rust panic must never take the conversion down: the reference answers
     return M.refined_volume(tris, meta, levels=levels, tol=tol, centroid=centroid, fid=fid)
 
 # ---------------- progress file + streaming meshes for the viewer ----------------

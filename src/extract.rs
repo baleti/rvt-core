@@ -187,11 +187,33 @@ pub fn decode_all(s: &Schema, chunk: &[u8], cands: &[usize], p: &Params) -> Vec<
 }
 
 /// sequential replay of work(): returns (records in insertion order keyed (eid, canonical tag), headers in insertion order)
-pub fn merge(s: &Schema, chunk: &[u8], cands: &[usize], mut decoded: Vec<Cand>, p: &Params) -> (Vec<((u64, u32), Rec)>, Vec<(u64, Rec)>) {
-    let mut recs: Vec<((u64, u32), Rec)> = vec![];
-    let mut rkeys: FxHashSet<(u64, u32)> = FxHashSet::default();
-    let mut ehs: Vec<(u64, Rec)> = vec![];
-    let mut ekeys: FxHashSet<u64> = FxHashSet::default();
+pub fn merge(s: &Schema, chunk: &[u8], cands: &[usize], decoded: Vec<Cand>, p: &Params) -> (Vec<((u64, u32), Rec)>, Vec<(u64, Rec)>) {
+    let mut st = MergeState::default();
+    merge_into(s, chunk, cands, decoded, p, &mut st);
+    (st.recs, st.ehs)
+}
+
+/// first-wins merge state carried across candidate batches
+#[derive(Default)]
+pub struct MergeState {
+    pub recs: Vec<((u64, u32), Rec)>,
+    rkeys: FxHashSet<(u64, u32)>,
+    pub ehs: Vec<(u64, Rec)>,
+    ekeys: FxHashSet<u64>,
+}
+
+/// decode + merge in batches of candidates (same order, same state as one pass): only one batch of decoded trees (incl. duplicates the merge rejects) is alive
+pub fn decode_merge(s: &Schema, chunk: &[u8], cands: &[usize], p: &Params, batch: usize) -> (Vec<((u64, u32), Rec)>, Vec<(u64, Rec)>) {
+    let mut st = MergeState::default();
+    for part in cands.chunks(batch.max(1)) {
+        let dec = decode_all(s, chunk, part, p);
+        merge_into(s, chunk, part, dec, p, &mut st);
+    }
+    (st.recs, st.ehs)
+}
+
+pub fn merge_into(s: &Schema, chunk: &[u8], cands: &[usize], mut decoded: Vec<Cand>, p: &Params, st: &mut MergeState) {
+    let MergeState { recs, rkeys, ehs, ekeys } = st;
     let mut dec = Dec::new(s);
     for (ci, c) in decoded.iter_mut().enumerate() {
         if let Some(o) = p.only {
@@ -231,7 +253,6 @@ pub fn merge(s: &Schema, chunk: &[u8], cands: &[usize], mut decoded: Vec<Cand>, 
             }
         }
     }
-    (recs, ehs)
 }
 
 pub fn canon_tags(s: &Schema) -> Vec<u32> {

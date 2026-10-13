@@ -670,7 +670,19 @@ fn loops_from_mine(mine: &[(i128, Mine)], allow_gaps: bool) -> Vec<Vec<UV>> {
         }
         return out;
     }
-    face_loops_chain(mine)
+    let ch = face_loops_chain(mine);
+    if !ch.is_empty() || std::env::var_os("RVT_NOSNAP").map_or(false, |x| !x.is_empty()) { return ch; }
+    // last resort: edge endpoints that miss each other by < 2e-3 (uv) are snapped together
+    let mut ends: Vec<UV> = vec![];
+    let mut snap = |p: UV| -> UV {
+        for q in &ends { if (p[0] - q[0]).abs() < 2e-3 && (p[1] - q[1]).abs() < 2e-3 { return *q; } }
+        ends.push(p); p
+    };
+    let polys2: Vec<Vec<UV>> = mine.iter().map(|(_, v)| {
+        let mut pl = vec![v.a]; pl.extend(v.inter.iter().copied()); pl.push(v.b);
+        let n = pl.len(); pl[0] = snap(pl[0]); pl[n - 1] = snap(pl[n - 1]); pl
+    }).collect();
+    cycles_from_polylines(&polys2, 1e-6)
 }
 
 fn face_loops_chain(mine: &[(i128, Mine)]) -> Vec<Vec<UV>> {

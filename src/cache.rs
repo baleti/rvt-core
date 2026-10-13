@@ -59,7 +59,7 @@ impl<'a> Rd<'a> {
         self.em.insert(x, o.clone_ref(py));
         Ok(o)
     }
-    #[inline] fn u8(&mut self) -> PyResult<u8> { let v = *self.b.get(self.p).ok_or_else(|| PyValueError::new_err("truncated cache"))?; self.p += 1; Ok(v) }
+    #[inline] pub fn u8(&mut self) -> PyResult<u8> { let v = *self.b.get(self.p).ok_or_else(|| PyValueError::new_err("truncated cache"))?; self.p += 1; Ok(v) }
     #[inline] fn n<const N: usize>(&mut self) -> PyResult<[u8; N]> {
         if self.p + N > self.b.len() { return Err(PyValueError::new_err("truncated cache")); }
         let a: [u8; N] = self.b[self.p..self.p + N].try_into().unwrap(); self.p += N; Ok(a)

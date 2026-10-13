@@ -24,7 +24,8 @@ pub struct RecDecoder {
     sink: Option<Vec<u8>>,
     writer: Option<std::thread::JoinHandle<std::io::Result<()>>>,
     /// two-stage extraction: full decoded results kept per partition until take_kept()
-    kept: Option<Vec<(Vec<((u64, u32), crate::dec::Rec)>, Vec<(u64, crate::dec::Rec)>)>>,
+    /// (full records serialised in the binary-cache block format, one entry per extract call: decoded trees are not kept in memory)
+    kept: Option<Vec<Vec<u8>>>,
 }
 
 pub fn classes_from_py(classes: &Bound<'_, PyList>) -> PyResult<Vec<Class>> {
@@ -191,15 +192,28 @@ impl RecDecoder {
     /// the kept results converted in full: [(records, headers)] per extract call, same form as extract_chunk returns
     fn take_kept<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
         let kept = self.kept.take().ok_or_else(|| PyValueError::new_err("keep_begin first"))?;
+        let geo = PyString::new_bound(py, "<geometry not decoded>");
         let out = PyList::empty_bound(py);
-        for (recs, ehs) in kept.iter() {
+        for b in kept.iter() {
+            let mut rd = crate::cache::Rd { b, p: 0, em: Default::default() };
             let lr = PyList::empty_bound(py);
-            for ((eid, ct), r) in recs.iter() {
-                let key = PyTuple::new_bound(py, [eid.into_py(py), self.conv.cname(py, *ct)]);
-                lr.append(PyTuple::new_bound(py, [key.into_py(py), self.conv.rec(py, r)?.into_py(py)]))?;
-            }
             let le = PyList::empty_bound(py);
-            for (eid, r) in ehs.iter() { le.append(PyTuple::new_bound(py, [eid.into_py(py), self.conv.val(py, &r.fields, &r.slots)?]))?; }
+            while rd.p < b.len() {
+                let nr = rd.u32()? as usize;
+                for _ in 0..nr {
+                    let eid = rd.u64()?;
+                    let ct = rd.u32()?;
+                    let key = PyTuple::new_bound(py, [eid.into_py(py), self.conv.cname(py, ct)]);
+                    let r = rd.rec(py, &self.conv, &self.conv.keys, &geo)?;
+                    lr.append(PyTuple::new_bound(py, [key.into_py(py), r.into_py(py)]))?;
+                }
+                let ne = rd.u32()? as usize;
+                for _ in 0..ne {
+                    let eid = rd.u64()?;
+                    let v = rd.val(py, &self.conv, &self.conv.keys, &geo)?;
+                    le.append(PyTuple::new_bound(py, [eid.into_py(py), v]))?;
+                }
+            }
             out.append(PyTuple::new_bound(py, [lr.into_py(py), le.into_py(py)]))?;
         }
         Ok(out)
@@ -336,49 +350,49 @@ impl RecDecoder {
         let tm = std::env::var("RVT_CORE_TIMING").is_ok();
         extract::SLOW.store(std::env::var("RVT_CORE_SLOW").is_ok(), std::sync::atomic::Ordering::Relaxed);
         let t0 = std::time::Instant::now();
-        let want_block = self.sink.is_some();
-        let (recs, ehs, block) = py.allow_threads(|| {
-            let cands = extract::candidates_tagged(chunk, ids, w, &mask);
-            let t1 = t0.elapsed();
-            let dec = extract::decode_all(&s, chunk, &cands, &p);
-            let t2 = t0.elapsed();
-            let (recs, ehs) = extract::merge(&s, chunk, &cands, dec, &p);
-            if tm { eprintln!("rvt_core extract: {} bytes, {} candidates: scan {:?} decode {:?} merge {:?}", chunk.len(), cands.len(), t1, t2 - t1, t0.elapsed() - t2); }
-            // binary-cache block, serialised in parallel
-            let block = if want_block {
-                let mut b: Vec<u8> = Vec::new();
-                b.extend_from_slice(&(recs.len() as u32).to_le_bytes());
-                let parts: Vec<Vec<u8>> = crate::pool::run(|| recs.par_chunks(256).map(|ch| {
-                    let mut o = vec![];
-                    for ((eid, ct), r) in ch { o.extend_from_slice(&eid.to_le_bytes()); o.extend_from_slice(&ct.to_le_bytes()); crate::cache::put_rec(&mut o, r, !p.full[r.tag as usize]); }
-                    o
-                }).collect());
-                for x in parts { b.extend_from_slice(&x); }
-                b.extend_from_slice(&(ehs.len() as u32).to_le_bytes());
-                let parts: Vec<Vec<u8>> = crate::pool::run(|| ehs.par_chunks(256).map(|ch| {
-                    let mut o = vec![];
-                    for (eid, r) in ch { o.extend_from_slice(&eid.to_le_bytes()); crate::cache::put_val(&mut o, &r.fields, &r.slots); }
-                    o
-                }).collect());
-                for x in parts { b.extend_from_slice(&x); }
-                Some(b)
-            } else { None };
-            (recs, ehs, block)
-        });
-        let t3 = t0.elapsed();
+        let want_block = self.sink.is_some() || keep;
+        let cands = py.allow_threads(|| extract::candidates_tagged(chunk, ids, w, &mask));
+        let t1 = t0.elapsed();
+        // batches of candidates: decode + first-wins merge (state carried over), then the newly accepted records are serialised, converted and dropped,
+        // so only one batch of decoded trees is alive (2020 rme_advanced: 775k candidates, > 4 GB when decoded at once)
+        let mut st = extract::MergeState::default();
+        let mut block: Vec<u8> = vec![];
         let lr = PyList::empty_bound(py);
-        for ((eid, ct), r) in recs.iter() {
-            let key = PyTuple::new_bound(py, [eid.into_py(py), self.conv.cname(py, *ct)]);
-            let d = if full[r.tag as usize] { self.conv.rec(py, r)? } else { self.conv.rec_slim(py, r)? };
-            lr.append(PyTuple::new_bound(py, [key.into_py(py), d.into_py(py)]))?;
-        }
         let le = PyList::empty_bound(py);
-        for (eid, r) in ehs.iter() {
-            le.append(PyTuple::new_bound(py, [eid.into_py(py), self.conv.val(py, &r.fields, &r.slots)?]))?;
+        let mut tconv = std::time::Duration::ZERO;
+        for part in cands.chunks(2048) {
+            let (recs, ehs, b) = py.allow_threads(|| {
+                let dec = extract::decode_all(&s, chunk, part, &p);
+                extract::merge_into(&s, chunk, part, dec, &p, &mut st);
+                let recs = std::mem::take(&mut st.recs);
+                let ehs = std::mem::take(&mut st.ehs);
+                let b = if want_block {
+                    let mut b: Vec<u8> = Vec::new();
+                    b.extend_from_slice(&(recs.len() as u32).to_le_bytes());
+                    for ((eid, ct), r) in recs.iter() { b.extend_from_slice(&eid.to_le_bytes()); b.extend_from_slice(&ct.to_le_bytes()); crate::cache::put_rec(&mut b, r, !p.full[r.tag as usize]); }
+                    b.extend_from_slice(&(ehs.len() as u32).to_le_bytes());
+                    for (eid, r) in ehs.iter() { b.extend_from_slice(&eid.to_le_bytes()); crate::cache::put_val(&mut b, &r.fields, &r.slots); }
+                    Some(b)
+                } else { None };
+                (recs, ehs, b)
+            });
+            if let Some(b) = b { block.extend_from_slice(&b); }
+            let tc = std::time::Instant::now();
+            for ((eid, ct), r) in recs.iter() {
+                let key = PyTuple::new_bound(py, [eid.into_py(py), self.conv.cname(py, *ct)]);
+                let d = if full[r.tag as usize] { self.conv.rec(py, r)? } else { self.conv.rec_slim(py, r)? };
+                lr.append(PyTuple::new_bound(py, [key.into_py(py), d.into_py(py)]))?;
+            }
+            for (eid, r) in ehs.iter() {
+                le.append(PyTuple::new_bound(py, [eid.into_py(py), self.conv.val(py, &r.fields, &r.slots)?]))?;
+            }
+            tconv += tc.elapsed();
         }
-        if tm { eprintln!("rvt_core extract: to python {:?}", t0.elapsed() - t3); }
-        if let (Some(sk), Some(b)) = (self.sink.as_mut(), block) { sk.extend_from_slice(&b); }
-        if let Some(k) = self.kept.as_mut() { k.push((recs, ehs)); }
+        if tm { eprintln!("rvt_core extract: {} bytes, {} candidates: scan {:?} decode+merge+convert {:?} (to python {:?})", chunk.len(), cands.len(), t1, t0.elapsed() - t1, tconv); }
+        if keep {
+            if let Some(sk) = self.sink.as_mut() { sk.extend_from_slice(&block); }
+            if let Some(k) = self.kept.as_mut() { k.push(block); }
+        } else if let Some(sk) = self.sink.as_mut() { sk.extend_from_slice(&block); }
         Ok(PyTuple::new_bound(py, [lr.into_py(py), le.into_py(py)]))
     }
 }
