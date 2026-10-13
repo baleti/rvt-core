@@ -53,8 +53,19 @@ Per component, same machine (measured during development, single runs):
 | element meshes, 2,705 placed elements, 28 MB Structural | 291 s pure Python (est.), ~125 s Python mesh code on the fast Doc | 2.0 s (Rust, 6 threads) |
 | extraction reload, 40 MB (pickle of the same object: 1.0 s) | - | 1.0 s (.rvtc, mmap) |
 
-## Against the targets
-* 40 MB (Electrical): element table + levels/grids + bboxes 1.6 s (target 2 s: met); usable model incl. params 6.1 s (target 8 s: met); first meshes 3.5 s, all 4,435 by 9.4 s, streamed.
-* 6 MB: table 0.7-0.8 s, all meshes 3.0 s; the full model (with params) 2.3 s since the params port (was 3.5 s), with the meshes computing alongside: the table meets 2 s, the full model is just above.
-* params since the port of its mapping loop: 6 MB 2.3 -> 0.65 s, 40 MB 4.8 -> 1.0 s (40 MB first open: full model 4.6 s).
-* Cached: table 0.07-0.10 s and meshes 0.1-0.3 s (met); the full model reload is 0.8-1.7 s, dominated by building ~10M Python objects (pickle is no faster).
+## Against the targets (2026-10-13, remote-host, other sessions active, load 3-6)
+| target | measured | status |
+|---|---|---|
+| 6 MB full model (table + extraction + params) first open < 2 s | 1.74-1.77 s (table 0.72-0.78 s) | met (was 2.3 s: GC frozen before re-enabling) |
+| 40 MB usable model < 8 s cold | table 1.5 s, full model 5.4 s with all meshes computing alongside | met |
+| cached full model < 0.5 s | 6 MB 0.51 s (was 0.94 s), 40 MB 1.7 s | 6 MB at target; 40 MB bound by building ~25M Python objects (the viewer reopens its own converted model instead) |
+| all meshes, 40 MB first open | 12.1 s (2.9M triangles; the reference's curved-face refinement adds 38% triangles), warm 0.3 s | streamed |
+| viewer item 13 (Facades prefetch) | Rust stream 1.1 s of the stage; the rest was the viewer's refined_volume check: Rust drop-in 34 s -> 0.6 s | drop-in released |
+
+## Differential status (reference = pure Python, released build)
+* Extraction want_all 76/76 files identical (2 files killed by the per-file memory cap), default 26/26, slim 25/25; channel-103 index 78/78; ES schemas 78/78.
+* Params: 70/70 identical (8 rme files over the 6 GB per-file cap, re-run at 8 GB); the port mirrors rvt_params.py of 2026-10-13 21:30; any newer rvt_params.py runs the reference loop with the Rust kernels (drift guard).
+* Meshes: bit-identical incl. per-triangle `mat` (300-400 sampled elements each: 2020 Residential, 2022 rst_basic, 2026 Facades, 2026 Site); uv containers (list vs tuple) are not compared.
+  Corpus run of the current release: remote-host (tests/h1_suite.sh mesh refvol params).
+* refined_volume (Rust) vs reference: equal to 1e-9 relative (tests/diff_refvol.py).
+* Not supported by the Rust mesh path: the reference's experimental RVT_STRIP mode.
