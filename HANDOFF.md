@@ -4,14 +4,15 @@
 * Released build (imported live by the reader hooks and rvt-viewer): `python/rvt_core.abi3.so` + `python/rvt_fast.py` + `python/rvt_viewer_fast.py`, .so also in `~/rvt-research/rvt_core.abi3.so`.
   Sources: `src/*.rs`, `pysrc/*.py`. `./build.sh` -> `dev/`, `./release.sh` (smoke diffs incl. params + cache round trip) -> `python/`. Then ALWAYS `tests/demo_smoke_all.sh` (the three DEMO.md files); single-file form:
   `(cd ~/src/rvt-viewer && sh tools/demo_smoke.sh ~/rvt-research/corpus/2022/30_rst_basic_sample_project.rvt 8990)`.
-* Mirrors the reference as of 2026-10-13 04:40 (rvt_mesh / rvt_elemmesh incl. refine_curved flips, whole-body rule, per-triangle mat) and rvt_params of 2026-10-12 21:30
+* Mirrors the reference as of 2026-10-13 18:45 (rvt_mesh / rvt_elemmesh; the log in PYTHON_REFERENCE_CHANGES.md is the authority) (rvt_mesh / rvt_elemmesh incl. refine_curved flips, whole-body rule, per-triangle mat) and rvt_params of 2026-10-12 21:30
   (drift guard: any other rvt_params.py runs the reference loop with Rust kernels). Check with `tests/oracle_watch.sh` (snapshot in logs/snap; `--accept` after porting).
 * Emergency switch: `RVT_NOFAST=1`.
 
 ## Differential status
-* remote-host suites (logs in remote-host:~/h1logs/rvt-core, NOT in the synced tree): extract want_all 76/76, default 26/26, slim 25/25, g103 78/78, params 73/73, mesh 25/25, refvol 25/25 (0 different);
-  7 rme files were killed by memory before the batching fix (2026-10-13): re-run queued (h1 job rvtcore-r2, 4G per file, starts when the shared slice is idle).
-* remote-host's numpy gives other bits than remote-host's for the reference itself ("geometrically equivalent" lines on remote-host); bit-identity is checked on remote-host (bench/mcmp.py, tests/cmp_ids.py).
+* README.md has the table: zero differences everywhere it ran. Not run (memory): rme_advanced x5 + two extra samples (2011 Nanjing, 2020 HYPERLOOP) for extraction / params; retry with
+  `FILE_MEM=4G tests/h1_suite.sh ...` only when the shared remote-host slice is idle (c4-geometry's fid jobs need ~3 GB headroom; `tests/h1_polite.sh` = sequential, 2G, only while the slice < 4.5 GB).
+* Locally (remote-host, capped scopes) 2020 rme_basic / rme_advanced now fit (extraction batching), so mesh checks run here too.
+* remote-host's numpy gives other bits than remote-host's for the reference itself; bit-identity is checked on remote-host (bench/mcmp.py, tests/cmp_ids.py).
 
 ## Done this session (see PROGRESS.md)
 per-triangle mat, params ports, curved refinement ports, refined_volume in Rust (viewer drop-in), fork-safe pool (viewer item 12), GC freeze (6 MB first open 1.75 s, warm 0.51 s).
