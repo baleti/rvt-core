@@ -18,6 +18,7 @@
 per-triangle mat, params ports, curved refinement ports, refined_volume in Rust (viewer drop-in), fork-safe pool (viewer item 12), GC freeze (6 MB first open 1.75 s, warm 0.51 s).
 
 ## Next
+0. (2026-10-14) `tests/h1_big.sh` queued in background on remote-host (polls ssh only): retries the memory-failed files at 4G one job at a time, only when the remote-host slice < 2.5 GB. Results in remote-host:~/h1logs/rvt-core (h1run pull h1logs/rvt-core), then update README table.
 1. When c4-geometry logs a change in ~/rvt-research/PYTHON_REFERENCE_CHANGES.md: port, `bench/mcmp.py` on Residential / rst_basic / Facades (+ Site ids), release, demo smoke.
 2. 40 MB warm full model 1.7 s (object construction bound); first-open all meshes 12 s on 40 MB (mat resolution needs the material context = rvt_xcache pickle load).
 3. Optional: materials/appearance tables in Rust (small), viewer progress-file consumption (ask c4-viewer).
