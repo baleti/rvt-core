@@ -42,3 +42,12 @@ Next: element_mesh in Rust, params, binary cache, README timings.
 - remote-host: params 69+ / mesh 25 / refvol 25 identical, rme reruns queued for an idle slice (per-file cap 4G after c4-geometry's OOMs).
 - Found: the reference is not bit-reproducible across CPUs (remote-host vs remote-host numpy SIMD); Rust identical on both.
 - Viewer conversion 2024 Structural 19.6 s (geometry 9.8 s, 57% the viewer's body_summary). Proposed get_x hook (pickle 1.6 s -> 0.6 s), rvt_rebar speedups.
+
+## 2026-10-15 (c2-rust, takes over from c4-rust)
+- remote-host: the retry queue (tests/h1_big.sh) never started because MemoryCurrent of the slice counts page cache (3 GB idle): now checks anon memory. Main corpus status was already 77/78 extract + params, 26/26 mesh + refvol; FAILED lines are skipped by the resumable logs, so h1_big2.sh removes/retries them; h1_big3.sh adds mesh_all / refvol_all over the whole corpus.
+- Viewer conversion profile (bench/conv_profile.py): the extraction was loaded 3x per conversion -> rvt_fast.extract_shared + reference hook get_x_ro (applied by c2-geometry): 1.65 s -> 0.64 s on 2024 Structural.
+  body_materials redundant with per-triangle mat (bench/mpcheck.py: 0 triangles changed on 5 files, 12,250 elements): c2-viewer dropped it (23cf722, Residential geometry 3.3 -> 1.7 s).
+- Materials tables: 10 ms after the context load: no Rust port needed (item 4 closed).
+- params mirror of 2026-10-15 (get_x_ro): identical on Residential / Structural, released, demo smoke OK.
+- Facades geometry stage: ensure_roofs 2.5 s is mostly first imports (OCP 2.0 s, scipy 0.5, matplotlib 0.3); prewarming them in a thread during 'reading': geometry -1.5 s, reading +0.4 s (noisy host).
+- rvt_viewer_fast.prestart(model) (dev only, not released): mesh stream started right after quick(), buffered for later em_geometries calls; results identical (Residential, Facades, Structural, rst_basic), but under load 12 it slows the reader stage (GIL contention): Facades 10.0/8.8 -> 8.0/9.8 s, Structural 11.8/16.6 -> 17.4/19.0 s. Not proposed.

@@ -2,6 +2,7 @@
   load(path, log)        == rvtviewer.reader.load(path, log)     {'recs','eh','W','params','classes','tagbase'}
   em_geometry(model, e)  == rvtviewer.build._em_geometry(GG, src, e) for one element (from the Rust mesh; see README for the equivalence rule)
   em_geometries(model, ids, chunk) -> iterator of (id, result) as meshes finish (progress file updated)
+  prestart(model)        start the mesh stream in the background right after model.quick() (em_geometries then consumes it)
   refined_volume(tris, meta, ..., fid) == rvt_mesh.refined_volume, in Rust for em_geometries' tris_raw/meta_raw (Facades 141 meshes: 34 s -> 0.6 s)
 Usage: sys.path.insert(0, os.path.expanduser('~/src/rvt-core/python')); import rvt_viewer_fast as VF; m = VF.open(path); d = VF.load(path, model=m)"""
 import os, sys
@@ -47,9 +48,43 @@ def em_geometry(model, e):
     r = md.element_meshes([int(e)], compact=True)[0]
     return _result(r, md.element_mesh(int(e)) if _needs_full(r) else None)
 
+def prestart(model, ids=None, chunk=128):
+    """start the Rust mesh stream early (right after model.quick()), in the background: meshes of `ids` (default model.mesh_ids(): elements with a channel-103 bbox,
+    no symbols) compute while the caller runs full() / its tables; the next em_geometries(model, ...) consumes them. Returns at once."""
+    import threading
+    if getattr(model, '_pre_th', None) is not None: return
+    def run():
+        try: model._pre = model.start_meshes(list(ids) if ids is not None else model.mesh_ids(), chunk=chunk)
+        except Exception: model._pre = None
+    model._pre = None; model._pre_th = threading.Thread(target=run, daemon=True); model._pre_th.start()
+
+def _stream(model, ids, chunk):
+    """lists of (id, compact mesh) for ids. With a prestarted stream: meshes it already delivered are kept in a buffer on the model, so a caller that stops early
+    (or asks for a subset) leaves the rest for the next call; ids the prestarted stream does not cover are computed afterwards by a new stream."""
+    th = getattr(model, '_pre_th', None)
+    if th is not None:
+        th.join()
+        buf = model.__dict__.setdefault('_pre_buf', {}); want = dict.fromkeys(int(i) for i in ids)
+        def take():
+            got = [(e, buf.pop(e)) for e in [e for e in want if e in buf]]
+            for e, _ in got: del want[e]
+            return got
+        got = take()
+        if got: yield got
+        it = getattr(model, '_pre_it', None)
+        if it is None and model._pre is not None: it = model._pre_it = iter(model._pre)
+        while want and it is not None:
+            part = next(it, None)
+            if part is None: model._pre_it = None; model._pre = None; break
+            buf.update(part); got = take()
+            if got: yield got
+        ids = list(want)
+        if not ids: return
+    yield from model.start_meshes(ids, chunk=chunk)
+
 def em_geometries(model, ids, chunk=128):
     md = None
-    for part in model.start_meshes(ids, chunk=chunk):
+    for part in _stream(model, ids, chunk):
         for e, r in part:
             full = None
             if _needs_full(r):
