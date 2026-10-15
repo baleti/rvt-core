@@ -4,7 +4,7 @@
 # scope (MemoryMax 6G, same slice) so one heavy file or a neighbour's memory cannot kill the whole suite; a killed file is logged as "FAILED rc".
 # uses a snapshot of the released build; oracle side single worker (memory-light)
 cd "$(dirname "$0")/.."
-SNAP=$(mktemp -d /tmp/rvtfast.XXXXXX); cp python/rvt_fast.py python/rvt_core.abi3.so "$SNAP"/
+SNAP=$(mktemp -d /tmp/rvtfast.XXXXXX); cp python/rvt_fast.py python/rvt_viewer_fast.py python/rvt_core.abi3.so "$SNAP"/
 export RVT_FAST_DIR="$SNAP" RVT_CORE_NOCACHE=1 RVT_WORKERS=1 RVT_THREADS=4
 PY=${PY:-python}
 L=$HOME/h1logs/rvt-core; mkdir -p $L
@@ -18,7 +18,7 @@ run1() {  # suite log file args...
   local log=$1 f=$2; shift 2
   grep -q "^$(basename "$f" | cut -c1-40)" "$log" 2>/dev/null && return 0
   systemd-run --user --scope --quiet --slice=rvt-offload.slice -p MemoryMax=${FILE_MEM:-4G} -p MemorySwapMax=0 $PY "$@" "$f" >> "$log" 2>> "$log.err"
-  local rc=$?; [ $rc -gt 1 ] && printf '%-48s FAILED rc=%d\n' "$(basename "$f" | cut -c1-48)" $rc >> "$log"
+  local rc=$?; [ $rc -gt 1 ] || { [ $rc -eq 1 ] && ! tail -1 "$log" | grep -q "^$(basename "$f" | cut -c1-40)"; } && printf '%-48s FAILED rc=%d\n' "$(basename "$f" | cut -c1-48)" $rc >> "$log"
   return 0
 }
 for s in "$@"; do
