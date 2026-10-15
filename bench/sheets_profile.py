@@ -28,3 +28,13 @@ for i in views: stage('render view %s %s' % (doc['views'][i]['kind'], i), lambda
 for sh in ss[:2]: stage('render sheet %s' % sh['id'], lambda: drawings.render(M, 'sheet', sh['id']))
 if pr:
     pr.disable(); pstats.Stats(pr).sort_stats('cumulative').print_stats(45)
+# the graphics Doc: reference (what rvtsheets.reader.File.g builds) vs the Rust-backed drop-in
+import rvt_elemmesh as EM, rvt_fast as RF
+print('--- graphics Doc: reference vs rvt_fast (fast on = %s)' % RF.on())
+t = time.time(); d1 = EM.Doc(f); d1.res; print('EM.Doc + index      %6.2fs' % (time.time() - t))
+t = time.time(); d2 = RF.Doc(f); print('rvt_fast.Doc        %6.2fs' % (time.time() - t))
+ids = [e for e, i in d2.res.items() if i.get('bbox')][:300]
+t = time.time(); a = [EM.element_mesh(d1, e) for e in ids]; ta = time.time() - t
+t = time.time(); b = [EM.element_mesh(d2, e) for e in ids]; tb = time.time() - t
+md = RF.mesh_doc(d2); t = time.time(); c = [RF.element_mesh_rust(d2, e) for e in ids]; tc = time.time() - t
+print('300 element_mesh: reference %.2fs, python on fast Doc %.2fs, Rust %.2fs' % (ta, tb, tc))
