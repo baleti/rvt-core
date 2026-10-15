@@ -227,7 +227,9 @@ class G103:
             if gc_was: gc.enable()
     def record(s, info):
         """== g103_get.get_record(f, info)"""
-        r = s.rd.g103_record(info['pn'], info['seg'], info['off'])
+        # collector paused while Rust builds the record's objects (acyclic, thousands of dicts): young-generation passes during the build were 60-70% of the
+        # time (2024 Structural, 3000 records: 1.33 s -> 0.43 s)
+        with _nogc(): r = s.rd.g103_record(info['pn'], info['seg'], info['off'])
         if r is None: raise KeyError((info['pn'], info['seg']))
         return r
 

@@ -31,6 +31,8 @@ for s in "$@"; do
     params) for f in $ALL; do run1 $log $f tests/diff_params.py; done ;;
     mesh) for f in $SUB; do run1 $log $f tests/diff_mesh.py --impl rust --n 300; done ;;
     refvol) for f in $SUB; do run1 $log $f tests/diff_refvol.py; done ;;
+    mesh_all) log=$L/h1_${P}mesh.log; for f in $ALL; do run1 $log $f tests/diff_mesh.py --impl rust --n 300; done ;;      # whole corpus (same log: the sampled third is skipped)
+    refvol_all) log=$L/h1_${P}refvol.log; for f in $ALL; do run1 $log $f tests/diff_refvol.py; done ;;
   esac
   ok=$(grep -cE 'IDENTICAL|  OK$' $log); fl=$(grep -cE 'FAILED rc|^FAIL ' $log); n=$(grep -cvE '^  ' $log)
   echo "$P$s done $(date +%H:%M): $ok ok, $fl failed, $((n - ok - fl)) DIFFERENT" >> $L/h1_summary.log
