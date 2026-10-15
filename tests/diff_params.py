@@ -12,6 +12,6 @@ for f in sys.argv[1:]:
     t = time.time(); b = RF.params(f, x); tb = time.time() - t                       # same extraction (as Model.full): one copy in memory
     nd = sum(digest(a[k]) != digest(b.get(k)) for k in a) + len(set(b) - set(a)) + (list(a) != list(b))
     bad += nd > 0
-    if RF._params_drift(): nd = nd or 'DRIFT'          # reference rvt_params.py differs from the ported one: this run used the reference loop
+    if os.environ.get('RVT_CORE_PARAMS_MIRROR') and RF._params_drift(): nd = nd or 'DRIFT'          # reference rvt_params.py differs from the ported one: this run used the reference loop
     print('%-48s %6d elements  oracle %5.2fs fast %5.2fs  %s' % (os.path.basename(f)[:48], len(a), ta, tb, 'IDENTICAL' if not nd else ('NOT TESTED (rvt_params.py drift: reference loop ran)' if nd == 'DRIFT' else 'DIFFERENT %d' % nd)), flush=True)
 sys.exit(1 if bad else 0)

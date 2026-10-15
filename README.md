@@ -74,7 +74,7 @@ Zero differences in every completed comparison. Files that did not finish are th
 | element meshes (sampled 300 per file, bit-identical incl. per-triangle material) | 25 of 26 sampled files identical | 23 of 24 |
 | refined_volume (to 1e-9) | 25 of 26 | 23 of 24 |
 Not run = to be repeated with a 4 GB cap when the slice is idle (`tests/h1_suite.sh`, `FILE_MEM=4G`); locally (remote-host) the same code is bit-identical on 2020 Residential, 2022 rst_basic, 2026 Facades and Site samples, and extraction of 2020 rme_advanced / 2021 rme_advanced verified for peak memory (2.8 / 1.8 GB).
-* Params mirror the reference of 2026-10-12 21:30; a newer rvt_params.py runs the reference loop with the Rust kernels (drift guard).
+* Params (since 2026-10-15): always the reference rvt_params.params loop with the Rust kernels (FlatSrc / resolve / ifc_stored), so every reference edit is live; rst_basic 1.6 s -> 0.7 s. The old hand mirror is opt-in (RVT_CORE_PARAMS_MIRROR=1, only for the rvt_params.py it was ported from).
 * Meshes mirror rvt_mesh / rvt_elemmesh of 2026-10-13 (morning); newer edits are ported as they are logged (PYTHON_REFERENCE_CHANGES.md).
 * Cross-machine: the reference is not bit-reproducible across CPUs (numpy SIMD): remote-host lines marked "geometrically equivalent" are the reference varying, not the port.
 * refined_volume (Rust) vs reference: equal to 1e-9 relative (tests/diff_refvol.py).

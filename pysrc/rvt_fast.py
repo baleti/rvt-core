@@ -565,7 +565,8 @@ def params(path, x=None):
     """== rvt_params.params(path): the reference code, with its three hot kernels (Src/resolve/rvt_ifc.stored) running in Rust"""
     import rvt_params as P, rvt_map2 as M, rvt_ifc
     if not on(): return P.params(path)
-    if not os.environ.get('RVT_CORE_PARAMS_PATCH') and not os.environ.get('RVT_PARAMS_GEOM') and not _params_drift():
+    # the hand mirror (_params_impl) is opt-in since 2026-10-15: the reference loop with the Rust kernels is as fast (0.74 s vs ~0.6 s on rst_basic) and always current
+    if os.environ.get('RVT_CORE_PARAMS_MIRROR') and not os.environ.get('RVT_PARAMS_GEOM') and not _params_drift():
         import gc
         if x is None: x = extract(path, want_all=True)
         gc_was = gc.isenabled(); gc.disable()
