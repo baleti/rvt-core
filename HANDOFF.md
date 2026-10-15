@@ -3,6 +3,8 @@
 ## c2-rust 2026-10-15 (newest; details PROGRESS.md)
 * Mirrors reference of 2026-10-15 06:18: refined_volume ruled fan (_fan_uv), params Category override + _host_params (called as is). extract_shared + reference get_x_ro.
 * remote-host queue: tests/h1_big.sh (b2 EXTRA suites) -> h1_big2.sh (b4: last FAILED main files) -> h1_big3.sh (b5: mesh_all / refvol_all whole corpus). Logs remote-host:~/h1logs/rvt-core; logs/h1_big*.out.
+* 07:00 state: nohup queue on remote-host (tests/h1_big2.sh -> h1_big3.sh -> h1_big4.sh) keeps starting remote-host jobs b4 (rme_advanced 2018 retries), b5 (mesh_all/refvol_all), b6/b7 (stream_all crash sweep), b8 (Nanjing mesh/refvol at 6G). Check logs/h1_big*.out and remote-host:~/h1logs/rvt-core/h1_summary.log, then update the README differential table.
+  Known: x_refvol Nanjing DIFFERENT 1 came from the pre-fan Rust snapshot (05:24) vs the post-fan reference; b8 reruns it. x_extract_all / x_params 24/24 identical.
 * c2-geometry edits rvt_params.py often: tests/diff_params.py now prints NOT TESTED when the drift guard is active (update PARAMS_PORTED after porting).
 
 # (older) c4-rust, 2026-10-13
