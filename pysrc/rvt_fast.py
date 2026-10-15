@@ -547,7 +547,7 @@ def _params_impl(path, x):
     return out
 
 # sha1 of the rvt_params.py whose params() loop _params_impl mirrors; any other version runs the reference loop (with the Rust kernels) instead
-PARAMS_PORTED = '71c16beb7b47e5d037273aa8e37d3e715537dadb'
+PARAMS_PORTED = 'f7f4e73dbeffe349e40d1b18b2a57f30b94a4f72'
 def _params_drift():
     import hashlib
     try: return hashlib.sha1(open(os.path.join(READER, 'rvt_params.py'), 'rb').read()).hexdigest() != PARAMS_PORTED
@@ -572,6 +572,8 @@ def params(path, x=None):
         if x is not None:
             xx = {k: v for k, v in x.items() if k != 'sch'}
             saved_x = rvt_xcache.get_x; rvt_xcache.get_x = lambda p, xx=xx: xx
+            saved_ro = getattr(rvt_xcache, 'get_x_ro', None)
+            if saved_ro is not None: rvt_xcache.get_x_ro = rvt_xcache.get_x
         saved = (M.Src, M.resolve, rvt_ifc.stored)
         FS = _rc().FlatSrc; orig = M.resolve
         def resolve_bound(src, rid, via, path, FS=FS, orig=orig):
@@ -582,7 +584,9 @@ def params(path, x=None):
         try: return P.params(path)
         finally:
             M.Src, M.resolve, rvt_ifc.stored = saved
-            if x is not None: rvt_xcache.get_x = saved_x
+            if x is not None:
+                rvt_xcache.get_x = saved_x
+                if saved_ro is not None: rvt_xcache.get_x_ro = saved_ro
             if gc_was: gc.enable()
 
 # ---------------- progressive open for the viewer ----------------
