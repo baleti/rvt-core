@@ -169,9 +169,11 @@ pub fn refined_volume(tris: &[Tri], meta: &[Meta], levels: i32, tol: f64, fid: O
             ((du.max(1e-9) / 0.1).log2().ceil().max(1.0).min(5.0)) as i32
         } else { levels + 1 };
         // subdivision: each level replaces every triangle by its 4 children, child-major order (all first children, then all second, ...)
-        let mut cur: Vec<[UV; 3]> = vec![uv];
+        let fan = if kind == "ruled" { fan_uv(&ev, &uv, 1usize << lv) } else { None };
+        let fanned = fan.is_some();
+        let mut cur: Vec<[UV; 3]> = fan.unwrap_or_else(|| vec![uv]);
         let mid = |p: UV, q: UV| -> UV { [(p[0] + q[0]) / 2.0, (p[1] + q[1]) / 2.0] };
-        for _ in 0..lv {
+        for _ in 0..(if fanned { 0 } else { lv }) {
             let mut nx: Vec<[UV; 3]> = Vec::with_capacity(cur.len() * 4);
             for c in 0..4 {
                 for t in &cur {
@@ -223,6 +225,25 @@ pub fn refined_volume(tris: &[Tri], meta: &[Meta], levels: i32, tol: f64, fid: O
 }
 
 /// rvt_mesh.mesh_volume(tris, tol) -> (volume, closed, n_open_edges, area)
+/// == rvt_mesh._fan_uv (2026-10-15): a coarse ruled-surface triangle with exactly one degenerate vertex (ruled surface between a curve and a point) as an n x n grid
+/// along straight generators: P(s, t) = (u_b + s (u_c - u_b), v_apex + t (v_b + s (v_c - v_b) - v_apex)), cells [q00, q01, q11], [q00, q11, q10]; None otherwise
+fn fan_uv(ev: &std::sync::Arc<Surf>, uv: &[UV; 3], n: usize) -> Option<Vec<[UV; 3]>> {
+    let pole: Vec<bool> = uv.iter().map(|q| norm(sub(ev.eval(q[0], q[1]), ev.eval(q[0] + 0.3, q[1]))) < 1e-9).collect();
+    if pole.iter().filter(|&&b| b).count() != 1 { return None; }
+    let i = pole.iter().position(|&b| b).unwrap(); let (j, k) = ((i + 1) % 3, (i + 2) % 3);
+    let (ub, vb) = (uv[j][0], uv[j][1]); let (uc, vc) = (uv[k][0], uv[k][1]); let vp = uv[i][1];
+    let s: Vec<f64> = (0..=n).map(|a| if a == n { 1.0 } else { a as f64 * (1.0 / n as f64) }).collect();      // numpy linspace(0, 1, n + 1)
+    let p = |a: usize, b: usize| -> UV { [ub + s[a] * (uc - ub), vp + s[b] * (vb + s[a] * (vc - vb) - vp)] };
+    let mut out = Vec::with_capacity(2 * n * n);
+    for a in 0..n {
+        for b in 0..n {
+            let (q00, q10, q11, q01) = (p(a, b), p(a + 1, b), p(a + 1, b + 1), p(a, b + 1));
+            out.push([q00, q01, q11]); out.push([q00, q11, q10]);
+        }
+    }
+    Some(out)
+}
+
 pub fn mesh_volume(tris: &[Tri], tol: f64) -> (f64, bool, usize, f64) {
     if tris.is_empty() { return (0.0, false, 0, 0.0); }
     let mut vid: FxHashMap<K3, usize> = FxHashMap::default();

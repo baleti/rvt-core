@@ -493,7 +493,7 @@ def _params_impl(path, x):
     fu = RC.ifc_from_unique
     def _sg(v):
         v = int(v); return v - (1 << 64) if v >= 1 << 63 else (v - (1 << 32) if 1 << 31 <= v < 1 << 32 else v)
-    ENUM = P.ENUM; PN = P.PNAMES
+    ENUM = P.ENUM; PN = P.PNAMES; catovr_off = bool(os.environ.get('RVT_NOCATOVR'))
     for eid, r in recs.items():
         c = r['class']; f = r['fields']; d = src.apply(eid, c)
         d.update(P.stored_params(f, by_name=True))
@@ -531,23 +531,28 @@ def _params_impl(path, x):
             if not st.get(eid) and c.endswith('CenterLine') and o is not None and o in uid: d['IfcGUID'] = st.get(o) or fu(uid[o])
         for bip, ru in ENUM.get(c, {}).items():
             nm = PN.get(bip)
-            if nm is None or nm in d: continue
+            ovr = nm == 'Category' and not catovr_off      # learned per-class Category beats the header category (reference 2026-10-15)
+            if nm is None or (nm in d and not ovr): continue
             if 'const' in ru: v = P._cast(*ru['const'])
             else:
                 import learn_enum as _LE
                 k = _LE._key(src.resolve(eid, ru['via'], ru['path']))
                 hit = ru['table'].get(k) if k is not None else None
                 v = P._cast(*hit) if hit else None
-            if v is not None: d[nm] = v
+            if v is not None:
+                d[nm] = v
+                if ovr: d['Category|ElementId'] = v
         out[eid] = {'class': c, 'params': d}
     for eid, o in list(out.items()):
         if o['class'] == 'FamilyInstance' and 'Length' in o['params']:
             am = F.S_(recs[eid]['fields'], 'm_oFamInstUserData', 'm_analyticalModelId')
             if am is not None and int(am) in out and out[int(am)]['class'].startswith('AnalyticalModel'): out[int(am)]['params'].setdefault('Length', o['params']['Length'])
+    hp = getattr(P, '_host_params', None)                       # FamilyInstance Host / Host Id post-pass (reference 2026-10-15, called as is)
+    if hp is not None and not os.environ.get('RVT_NOHOST'): hp(out, recs)
     return out
 
 # sha1 of the rvt_params.py whose params() loop _params_impl mirrors; any other version runs the reference loop (with the Rust kernels) instead
-PARAMS_PORTED = 'f7f4e73dbeffe349e40d1b18b2a57f30b94a4f72'
+PARAMS_PORTED = '38d51a18828a8dd576901c47c0378f0e2567aa3f'
 def _params_drift():
     import hashlib
     try: return hashlib.sha1(open(os.path.join(READER, 'rvt_params.py'), 'rb').read()).hexdigest() != PARAMS_PORTED
