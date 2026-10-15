@@ -1,3 +1,12 @@
+# rvt-core HANDOFF (c4-rust, 2026-10-15 13:00)
+
+## c4-rust takeover state
+* Done: params hand mirror retired (reference loop + Rust kernels by default, RVT_CORE_PARAMS_MIRROR=1 opt-in); diff_params rst_basic IDENTICAL (0.68 s vs oracle 1.57 s); released, tests/demo_smoke_all.sh OK on all 3 demo files; committed 425fadd. oracle_watch snapshot accepted (rvt_params 11:40, rvt_geom mep_curve ends: no Rust port needed, params run the reference code). README differential table updated from h1_summary.log (0 DIFFERENT anywhere, except Nanjing refvol).
+* Open: Nanjing 546245 refvol remote-host 0.4924 (Rust) vs 0.5220 (ref); remote-host equal. bench/nanjing_probe.py prints the pole distances seen by the reference _fan_uv + both volumes. It OOMs on remote-host at 3-4 GB (Nanjing extraction), so run via h1run (env rvt) when remote-host MemAvailable >= 11 GB.
+  Suspect: pole test (< 1e-9 on ev(u) vs ev(u+0.3)) is borderline on remote-host's numpy SIMD, so the reference itself flips between remote-host and remote-host (cross-machine non-reproducibility, see README note). If probe shows a distance near 1e-9, close as reference noise.
+* h1_big5.sh queue still running (c1/c2 stream sweep, then c3 2018 05_rme_advanced at 6G). Check: ssh remote-host 'tail ~/h1logs/rvt-core/h1_summary.log'.
+* Next: mmap binary cache + compact meshes cache for 40 MB cached full model (0.9 s now, target 0.5 s); progress file consumption by c4-viewer; keep oracle_watch.sh ports.
+
 # rvt-core HANDOFF (c2-rust, updated 2026-10-15 06:25)
 
 ## c2-rust 2026-10-15 (newest; details PROGRESS.md)
