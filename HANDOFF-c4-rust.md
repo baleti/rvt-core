@@ -1,15 +1,14 @@
-# HANDOFF c4-rust (written 2026-10-14 at the weekly budget stop; resume 2026-10-18)
+# HANDOFF c4-rust (2026-10-15 ~13:50, weekly budget stop at 96%)
 
-## State
-* Everything is committed (last: tests/h1_big.sh). Released build in python/ and ~/rvt-research/rvt_core.abi3.so mirrors the reference up to 2026-10-13 18:45. Demo smoke passes (tests/demo_smoke_all.sh). Details: HANDOFF.md, README.md (differential table), PROGRESS.md.
-* Running services: none. The background tests/h1_big.sh queue was killed before it started any remote-host job (slice was busy with c4-geometry fid8/fid9).
+## State (all committed, tested)
+* HEAD: rvt-core master. Released build in python/ + ~/rvt-research/rvt_core.abi3.so; demo smoke OK on all 3 demo files after the last release (symbol-check fallback, params reference loop + Rust kernels; hand mirror opt-in RVT_CORE_PARAMS_MIRROR=1). Details: HANDOFF.md, README.md, RUST_INTEGRATION.md (c4-rust 13:30 note).
+* oracle_watch snapshot accepted at 12:xx (rvt_params 11:40, rvt_geom mep_curve ends; no Rust port needed).
 
-## Remaining work
-1. Retry the memory-failed files on remote-host, one job at a time, only when the shared slice (ssh remote-host 'systemctl --user show rvt-offload.slice -p MemoryCurrent --value') is below ~2.5 GB: `nohup tests/h1_big.sh &` (4G per file; jobs b1 main extract_all+params, b2 EXTRA=1 all suites, b3 main mesh+refvol). Logs are resumable in remote-host:~/h1logs/rvt-core (h1run pull h1logs/rvt-core). Files: rme_advanced x5, rme_basic 22/28 (params), 2011 Nanjing, 2020 HYPERLOOP. Then update the README table.
-2. Check `tests/oracle_watch.sh` and ~/rvt-research/PYTHON_REFERENCE_CHANGES.md for new c4-geometry changes: port, bench/mcmp.py on Residential/rst_basic/Facades, ./build.sh, ./release.sh, tests/demo_smoke_all.sh, then `oracle_watch.sh --accept` and commit.
-3. Check RUST_INTEGRATION.md / ~/src/rvt-viewer/NEEDS-FROM-READER.md for new c4-viewer requests.
-4. Optional perf: 40 MB warm full model 1.7 s; first-open all meshes 12 s on 40 MB; Rust materials/rebar only if profiles ask.
+## remote-host jobs
+* `tests/h1_big5.sh` (nohup on remote-host, log logs/h1_big5.out): stream main DONE (77 ok, 1 failed, 0 DIFFERENT); x_stream running/next; then c3 = 2018 05_rme_advanced at 6G (extract/params/slim/mesh_all/refvol_all). Results: ssh remote-host 'tail ~/h1logs/rvt-core/h1_summary.log'. If remote-host reboots: `nohup tests/h1_big5.sh > logs/h1_big5.out 2>&1 < /dev/null &` (resumable).
 
-## Open problems
-* Reference is not bit-reproducible across CPUs; check bit identity on remote-host.
-* remote-host slice is 9 GB shared; honour c4-geometry's request to leave ~3 GB.
+## Remaining
+1. Read the c3 results; any DIFFERENT is a bug. Update README differential table (05_rme_advanced "pending").
+2. Nanjing 546245 refvol (remote-host 0.4924 vs ref 0.5220, remote-host equal): run `bench/nanjing_probe.py FILE 546245` via h1run (env rvt) when remote-host MemAvailable >= 11 GB (OOMs on remote-host even at 4G).
+3. Speed: 40 MB cached full model 0.9 s -> 0.5 s (compact meshes/mmap cache), viewer consumption of the progress file (ask c4-viewer).
+4. Keep porting kernel-relevant reference edits (oracle_watch.sh; rvt_map2 resolve/Src, rvt_ifc.stored, rvt_mesh/rvt_elemmesh).
