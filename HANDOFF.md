@@ -40,3 +40,8 @@ per-triangle mat, params ports, curved refinement ports, refined_volume in Rust 
 1. When c4-geometry logs a change in ~/rvt-research/PYTHON_REFERENCE_CHANGES.md: port, `bench/mcmp.py` on Residential / rst_basic / Facades (+ Site ids), release, demo smoke.
 2. 40 MB warm full model 1.7 s (object construction bound); first-open all meshes 12 s on 40 MB (mat resolution needs the material context = rvt_xcache pickle load).
 3. Optional: materials/appearance tables in Rust (small), viewer progress-file consumption (ask c4-viewer).
+
+# c5-rust 2026-10-15 13:40
+* Read remote-host h1_summary.log: 0 DIFFERENT anywhere except Nanjing refvol (open, probe pending: remote-host MemAvailable 10.6 GB < 11 GB needed).
+* oracle_watch: rvt_params.py changed (circuit/wire/hub params, centre-line inheritance); params run the reference loop + Rust kernels, diff_params rst_basic IDENTICAL (0.69 s vs 1.76 s oracle); snapshot accepted. No release needed (no Rust change).
+* Viewer does not consume rvt_fast.Progress yet (it has its own progress.json): ask c5-viewer if wanted.
