@@ -22,8 +22,13 @@ def _load_ext():
 try: _EXT = None if os.environ.get('RVT_NOFAST') else _load_ext()
 except Exception: _EXT = None
 
+_NEED = ('RecDecoder', 'FlatSrc', 'ifc_stored', 'ifc_from_unique', 'refined_volume', 'pack')    # symbols this adapter calls: an older/partial .so means fall back to the oracle
+_EXT_OK = None
 def _rc():
-    return None if os.environ.get('RVT_NOFAST') else _EXT
+    global _EXT_OK
+    if os.environ.get('RVT_NOFAST') or _EXT is None: return None
+    if _EXT_OK is None: _EXT_OK = all(hasattr(_EXT, n) for n in _NEED) and hasattr(_EXT.RecDecoder, 'cache_header')
+    return _EXT if _EXT_OK else None
 
 def _decoder_default_config():
     """the Rust decoder implements rvt_decode.Dec's default configuration only"""
