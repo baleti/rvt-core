@@ -64,15 +64,15 @@ Per component, same machine (measured during development, single runs):
 | viewer item 13 (Facades prefetch) | Rust stream 1.1 s of the stage; the rest was the viewer's refined_volume check: Rust drop-in 34 s -> 0.6 s | drop-in released |
 
 ## Differential status (reference = pure Python, released builds, host1 logs 2026-10-15)
-Zero differences in every completed comparison except one refined_volume case (below). The one main-corpus file not finished is 2018 05_rme_advanced, whose pure-Python reference exceeds the per-file cap on the shared host1 slice (queued at 6 GB: tests/h1_big5.sh).
+Zero differences in every comparison over the whole main corpus (78 files, 2017-2026) and the 24 extra samples (stream/robustness sweep also 78/78 and 24/24). The Nanjing refined_volume case was a stale-snapshot artefact (see the table).
 | suite | main corpus (78 files, 2017-2026) | extra samples (24 files: projects 2011-2022, families 2016-2026) |
 |---|---|---|
-| extraction want_all (records + headers, types, key order, float bits) | 77 identical, 1 pending | 24 identical |
+| extraction want_all (records + headers, types, key order, float bits) | 78 identical (2018 05_rme_advanced rerun at 6G, 2026-10-15 19:20-19:34) | 24 identical |
 | extraction default / slim (subset of the corpus) | 26 / 25 identical | - |
 | channel-103 index + records | 78 identical | 24 identical |
-| parameters | 77 identical, 1 pending | 24 identical |
-| element meshes (300 per file, every file, bit-identical incl. per-triangle material) | 77 identical, 1 pending | 24 identical |
-| refined_volume (to 1e-9) | 77 identical, 1 pending | 23 identical, 1 different on host1 only (2011 Nanjing element 546245: identical on host3) |
+| parameters | 78 identical (2018 05_rme_advanced rerun at 6G, 2026-10-15 19:20-19:34) | 24 identical |
+| element meshes (300 per file, every file, bit-identical incl. per-triangle material) | 78 identical (2018 05_rme_advanced rerun at 6G, 2026-10-15 19:20-19:34) | 24 identical |
+| refined_volume (to 1e-9) | 78 identical (2018 05_rme_advanced rerun at 6G, 2026-10-15 19:20-19:34) | 24 identical (2011 Nanjing 546245 differed in an earlier host1 run from a stale snapshot; rerun 2026-10-15 19:07 on host1: 0.52205 in both, pole distance exactly 0) |
 * Params (since 2026-10-15): always the reference rvt_params.params loop with the Rust kernels (FlatSrc / resolve / ifc_stored), so every reference edit is live; rst_basic 1.6 s -> 0.7 s. The old hand mirror is opt-in (RVT_CORE_PARAMS_MIRROR=1, only for the rvt_params.py it was ported from).
 * Meshes mirror rvt_mesh / rvt_elemmesh of 2026-10-13 (morning); newer edits are ported as they are logged (PYTHON_REFERENCE_CHANGES.md).
 * Cross-machine: the reference is not bit-reproducible across CPUs (numpy SIMD): host1 lines marked "geometrically equivalent" are the reference varying, not the port.
