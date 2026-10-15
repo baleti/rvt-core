@@ -799,3 +799,14 @@ class Model:
         return ids
     def close(s):
         if s.prog: s.prog.close()
+
+
+def tessellate_geometry(geo):
+    """rvt_mesh.tessellate_geometry(geo) for a decoded Geometry node, Rust-backed (bit-identical triangles, fidx, frs, fprio, unsupported, faces; tests/diff_tess.py).
+    Differences: 'tris' is a float64 ndarray (n, 3, 3) and 'meta' (surface evaluators) is not returned. Any failure (stale extension, unsupported value, a case where the
+    reference raises) falls back to the reference function, so exceptions and results are the reference's."""
+    if on() and hasattr(_rc(), 'tessellate_geometry'):
+        try: return _rc().tessellate_geometry(geo)
+        except Exception: pass
+    import rvt_mesh
+    return rvt_mesh.tessellate_geometry(geo)

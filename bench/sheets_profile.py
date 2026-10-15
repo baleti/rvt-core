@@ -1,5 +1,5 @@
 """profile the reader calls of rvt-sheets (rvtsheets.reader.File + drawings.Model) on one file: stage timings and the top cumulative reader functions.
-usage: sheets_profile.py FILE [--prof]   (run on host1 via h1run; python = ~/src/rvt-sheets-dev/.venv/bin/python)"""
+usage: sheets_profile.py FILE [--prof]   (host1 via h1run: python = the rvt env python)"""
 import os, sys, time, cProfile, pstats
 sys.path.insert(0, os.path.expanduser('~/src/rvt-sheets-dev')); sys.path.insert(0, os.path.expanduser('~/rvt-research'))
 sys.path.insert(0, os.path.expanduser('~/src/rvt-core/python'))

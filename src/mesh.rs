@@ -47,14 +47,7 @@ pub fn resolve_rec(r: Rec) -> Val {
     resolve(r.fields, &mut slots)
 }
 
-/// key ids of every field name the mesh code reads (u32::MAX = not in this schema)
-#[allow(non_snake_case)]
-pub struct K {
-    pub m: FxHashMap<&'static str, u32>,
-}
-impl K {
-    pub fn new(s: &Schema) -> K {
-        let names = [
+pub const K_NAMES: &[&str] = &[
             "m_bBox", "m_pFacetedTopology", "m_oConditions", "m_comp", "m_param", "m_value", "m_negateDirCondition", "m_pFaces", "m_instanceInfo", "m_subNodes", "m_GInfo",
             "m_flags", "m_categoryId", "m_forbiddenTarget", "m_targets", "m_symbolId", "m_Trf", "m_3x3", "m_or", "m_oEmbeddedSymbolGRep", "m_radius", "m_center", "m_zVec",
             "m_xVec", "m_yVec", "m_NodeArray", "m_uParams", "m_vParams", "m_iPoint", "m_iTangent", "m_iMixedDer", "m_halfAngle", "m_pProfileCurve", "m_pProfileCurve1",
@@ -63,8 +56,22 @@ impl K {
             "m_endParams", "m_iParametr", "m_Degree", "m_ctrlPoints", "m_xyz", "m_pnt", "m_point", "m_pt", "m_weight", "m_w", "m_basePnt", "m_referenceVector",
             "m_signedOffsetDistance", "m_pEdges", "m_renderStyleId",
         ];
+/// key ids of every field name the mesh code reads (u32::MAX = not in this schema)
+#[allow(non_snake_case)]
+pub struct K {
+    pub m: FxHashMap<&'static str, u32>,
+}
+impl K {
+    pub fn new(s: &Schema) -> K { K::build(|n| s.key_of.get(n).copied().unwrap_or(u32::MAX)) }
+    /// key ids without a file schema (dicts handed in from Python): names numbered after the reserved K_* ids
+    pub fn standalone() -> K {
+        let ix: FxHashMap<&str, u32> = K_NAMES.iter().enumerate().map(|(i, n)| (*n, 16 + i as u32)).collect();
+        K::build(|n| ix.get(n).copied().unwrap_or(u32::MAX))
+    }
+    fn build(f: impl Fn(&str) -> u32) -> K {
+        let names = K_NAMES;
         let mut m = FxHashMap::default();
-        for n in names { m.insert(n, s.key_of.get(n).copied().unwrap_or(u32::MAX)); }
+        for n in names.iter().copied() { m.insert(n, f(n)); }
         m.insert("handle", K_HANDLE);
         m.insert("obj", K_OBJ);
         m.insert("ref", K_REF);

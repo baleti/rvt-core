@@ -146,6 +146,7 @@ fn rvt_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(strip_pages, m)?)?;
     m.add_function(wrap_pyfunction!(select_closed_shell_dbg, m)?)?;
     m.add_function(wrap_pyfunction!(elemmesh::refined_volume, m)?)?;
+    m.add_function(wrap_pyfunction!(elemmesh::tessellate_geometry_py, m)?)?;
     m.add_function(wrap_pyfunction!(elemmesh::body_summary_core, m)?)?;
     m.add_function(wrap_pyfunction!(elemmesh::refine_curved_dbg, m)?)?;
     m.add_function(wrap_pyfunction!(joined, m)?)?;
