@@ -1,6 +1,7 @@
 #!/bin/bash
 # retry the files that did not fit the 2 GB cap: 4 GB per file, start only while the shared remote-host slice uses < 2.5 GB (leaves >= 2.5 GB for others), one job at a time. Logs are resumable (files with results are skipped).
-slice_ok() { cur=$(ssh remote-host 'systemctl --user show rvt-offload.slice -p MemoryCurrent --value' 2>/dev/null); [ -n "$cur" ] && [ "$cur" -lt 2500000000 ]; }
+# anon memory only (MemoryCurrent includes reclaimable page cache, ~3 GB even when idle)
+slice_ok() { cur=$(ssh remote-host 'p=$(systemctl --user show rvt-offload.slice -p ControlGroup --value); awk "/^anon /{print \$2}" /sys/fs/cgroup$p/memory.stat' 2>/dev/null); [ -n "$cur" ] && [ "$cur" -lt 2500000000 ]; }
 run_job() {
   local name=$1; shift
   while ! slice_ok; do sleep 300; done

@@ -99,6 +99,21 @@ def extract(path, extra=(), only_ids=None, want_all=False, slim=None):
     if not on(): return E.extract(path, extra=extra, only_ids=only_ids, want_all=want_all, slim=slim)
     return _extract(path, extra, only_ids, want_all, slim)
 
+_SHARED = {}
+def extract_shared(path):
+    """READ-ONLY want_all extraction shared inside the process: {'recs', 'eh', 'W'} whose recs / eh dicts are the same objects for every caller of the same file
+    (and the same as Model(path).full()'s, when a Model of this file finished it first). Content == extract(path, want_all=True) minus 'sch'.
+    Callers must not mutate it; one file is held at a time. Saves a full reload (28 MB: 0.55 s, 40 MB: 0.6 s) per extra reader context."""
+    import rvt_entities as E
+    if not on():
+        x = E.extract(path, want_all=True); x.pop('sch', None); return x
+    k = file_key(path); x = _SHARED.get(k)
+    if x is None:
+        x = extract(path, want_all=True); _share(k, x)
+    return {'recs': x['recs'], 'eh': x['eh'], 'W': x['W']}
+def _share(k, x):
+    _SHARED.clear(); _SHARED[k] = x
+
 def extract_two_stage(path, slim):
     """(x_slim, finish): x_slim == extract(path, want_all=True, slim=slim) now; finish() -> extract(path, want_all=True), converted from the same decode
     (no second inflate/decode). The binary cache is written in the full variant."""
@@ -704,7 +719,8 @@ class Model:
         s._set('extract', total=1)
         if s._x is None:
             fin = getattr(s, '_finish', None); s._finish = None
-            s._x = fin() if fin else extract(s.path, want_all=True)
+            s._x = fin() if fin else (_SHARED.get(s.key) or extract(s.path, want_all=True))
+            _share(s.key, s._x)
         x = s._x
         s._set(done=1, elements_decoded=len(x['recs']))
         s._set('params', total=1)
