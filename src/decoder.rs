@@ -195,7 +195,7 @@ impl RecDecoder {
         let geo = PyString::new_bound(py, "<geometry not decoded>");
         let out = PyList::empty_bound(py);
         for b in kept.iter() {
-            let mut rd = crate::cache::Rd { b, p: 0, em: Default::default() };
+            let mut rd = crate::cache::Rd::new(py, b, 0);
             let lr = PyList::empty_bound(py);
             let le = PyList::empty_bound(py);
             while rd.p < b.len() {
@@ -211,7 +211,7 @@ impl RecDecoder {
                 for _ in 0..ne {
                     let eid = rd.u64()?;
                     let v = rd.val(py, &self.conv, &self.conv.keys, &geo)?;
-                    le.append(PyTuple::new_bound(py, [eid.into_py(py), v]))?;
+                    le.append(PyTuple::new_bound(py, [eid.into_py(py), v.unbind()]))?;
                 }
             }
             out.append(PyTuple::new_bound(py, [lr.into_py(py), le.into_py(py)]))?;
@@ -277,7 +277,7 @@ impl RecDecoder {
         let keys: Vec<String> = match serde_json::from_value(hdr["keys"].clone()) { Ok(k) => k, Err(_) => return Ok(None) };
         let kt: Vec<Py<PyString>> = keys.iter().map(|k| PyString::intern_bound(py, k).unbind()).collect();
         let geo = PyString::new_bound(py, "<geometry not decoded>");
-        let mut rd = crate::cache::Rd { b, p: 12 + n, em: Default::default() };
+        let mut rd = crate::cache::Rd::new(py, b, 12 + n);
         let recs = PyDict::new_bound(py);
         let eh = PyDict::new_bound(py);
         while rd.p < b.len() {

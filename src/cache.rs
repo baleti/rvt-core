@@ -6,7 +6,7 @@ use crate::conv::Conv;
 use crate::dec::{Rec, Slot, SlotKind, Val};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict, PyList, PyString, PyTuple};
+use pyo3::types::{PyBytes, PyDict, PyFloat, PyList, PyString, PyTuple};
 
 pub const FORMAT: u32 = 1;
 
@@ -50,13 +50,36 @@ pub fn put_rec(o: &mut Vec<u8>, r: &Rec, slim: bool) {
     put_val(o, &r.fields, &r.slots);
 }
 
-/// em: one shared rvt_decode.EID instance per value (immutable int subclass: 0.5M ids of a 6 MB file have ~15k distinct values)
-pub struct Rd<'a> { pub b: &'a [u8], pub p: usize, pub em: rustc_hash::FxHashMap<i128, PyObject> }
-impl<'a> Rd<'a> {
-    fn eid(&mut self, py: Python<'_>, c: &crate::conv::Conv, x: i128) -> PyResult<PyObject> {
-        if let Some(o) = self.em.get(&x) { return Ok(o.clone_ref(py)); }
-        let o = if x < 0 { c.eid.bind(py).call1((x as i64,))?.unbind() } else { c.eid.bind(py).call1((x as u64,))?.unbind() };
-        self.em.insert(x, o.clone_ref(py));
+/// em: one shared rvt_decode.EID instance per value (immutable int subclass: 0.5M ids of a 6 MB file have ~15k distinct values);
+/// fm / im / sm: the same for floats (by bits), ints outside CPython's small-int cache and str values (immutable: 40 MB Electrical builds 787k floats with 142k
+/// distinct values, 1.2M large ints with 42k, 568k strings with 9.6k; sharing them removes a third of the allocations of a load)
+pub struct Rd<'a, 'py> {
+    pub b: &'a [u8], pub p: usize, pub em: rustc_hash::FxHashMap<i128, Bound<'py, PyAny>>,
+    fm: rustc_hash::FxHashMap<u64, Bound<'py, PyAny>>, im: rustc_hash::FxHashMap<i128, Bound<'py, PyAny>>, sm: rustc_hash::FxHashMap<&'a [u8], Bound<'py, PyAny>>,
+}
+// values are Bound (GIL-bound): dropping one is a plain decref, no thread-local GIL check as for Py<T> (that check was ~6% of a load)
+impl<'a, 'py> Rd<'a, 'py> {
+    pub fn new(_py: Python<'py>, b: &'a [u8], p: usize) -> Self { Rd { b, p, em: Default::default(), fm: Default::default(), im: Default::default(), sm: Default::default() } }
+    #[inline] fn int(&mut self, py: Python<'py>, x: i128) -> Bound<'py, PyAny> {
+        if (-5..=256).contains(&x) { return (x as i64).into_py(py).into_bound(py); }
+        if let Some(o) = self.im.get(&x) { return o.clone(); }
+        let o = if x < 0 { (x as i64).into_py(py).into_bound(py) } else { (x as u64).into_py(py).into_bound(py) };
+        self.im.insert(x, o.clone()); o
+    }
+    #[inline] fn float(&mut self, py: Python<'py>, bits: u64) -> Bound<'py, PyAny> {
+        if let Some(o) = self.fm.get(&bits) { return o.clone(); }
+        let o = PyFloat::new_bound(py, f64::from_bits(bits)).into_any(); self.fm.insert(bits, o.clone()); o
+    }
+    fn strv(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let k = self.u32()? as usize; let raw = self.bytes(k)?;
+        if let Some(o) = self.sm.get(raw) { return Ok(o.clone()); }
+        let s = std::str::from_utf8(raw).map_err(|_| PyValueError::new_err("bad utf8 in cache"))?;
+        let o = PyString::new_bound(py, s).into_any(); self.sm.insert(raw, o.clone()); Ok(o)
+    }
+    fn eid(&mut self, py: Python<'py>, c: &crate::conv::Conv, x: i128) -> PyResult<Bound<'py, PyAny>> {
+        if let Some(o) = self.em.get(&x) { return Ok(o.clone()); }
+        let o = if x < 0 { c.eid.bind(py).call1((x as i64,))? } else { c.eid.bind(py).call1((x as u64,))? };
+        self.em.insert(x, o.clone());
         Ok(o)
     }
     #[inline] pub fn u8(&mut self) -> PyResult<u8> { let v = *self.b.get(self.p).ok_or_else(|| PyValueError::new_err("truncated cache"))?; self.p += 1; Ok(v) }
@@ -72,20 +95,29 @@ impl<'a> Rd<'a> {
     }
     fn str(&mut self) -> PyResult<&'a str> { let k = self.u32()? as usize; std::str::from_utf8(self.bytes(k)?).map_err(|_| PyValueError::new_err("bad utf8 in cache")) }
 
-    pub fn val(&mut self, py: Python<'_>, c: &Conv, keys: &[Py<PyString>], geo: &Bound<'_, PyString>) -> PyResult<PyObject> {
+    pub fn val(&mut self, py: Python<'py>, c: &Conv, keys: &[Py<PyString>], geo: &Bound<'py, PyString>) -> PyResult<Bound<'py, PyAny>> {
         Ok(match self.u8()? {
-            0 => py.None(),
-            1 => i64::from_le_bytes(self.n::<8>()?).into_py(py),
-            2 => u64::from_le_bytes(self.n::<8>()?).into_py(py),
-            3 => f64::from_le_bytes(self.n::<8>()?).into_py(py),
-            4 => self.str()?.into_py(py),
-            5 => { let k = self.u32()? as usize; PyBytes::new_bound(py, self.bytes(k)?).into_py(py) }
-            6 | 7 => {
-                let tl = self.b[self.p - 1];
+            0 => py.None().into_bound(py),
+            1 => { let x = i64::from_le_bytes(self.n::<8>()?); self.int(py, x as i128) }
+            2 => { let x = u64::from_le_bytes(self.n::<8>()?); self.int(py, x as i128) }
+            3 => { let x = u64::from_le_bytes(self.n::<8>()?); self.float(py, x) }
+            4 => self.strv(py)?,
+            5 => { let k = self.u32()? as usize; PyBytes::new_bound(py, self.bytes(k)?).into_any() }
+            6 => {
+                let n = self.u32()? as usize;
+                // filled in place (PyList_SetItem steals the reference): no intermediate Vec
+                let l = unsafe { Bound::from_owned_ptr_or_err(py, pyo3::ffi::PyList_New(n as pyo3::ffi::Py_ssize_t))? };
+                for i in 0..n {
+                    let v = self.val(py, c, keys, geo)?;
+                    if unsafe { pyo3::ffi::PyList_SetItem(l.as_ptr(), i as pyo3::ffi::Py_ssize_t, v.into_ptr()) } != 0 { return Err(PyErr::fetch(py)); }
+                }
+                l
+            }
+            7 => {
                 let n = self.u32()? as usize;
                 let mut items = Vec::with_capacity(n);
                 for _ in 0..n { items.push(self.val(py, c, keys, geo)?); }
-                if tl == 6 { PyList::new_bound(py, items).into_py(py) } else { PyTuple::new_bound(py, items).into_py(py) }
+                PyTuple::new_bound(py, items).into_any()
             }
             8 => {
                 let n = self.u32()? as usize;
@@ -95,7 +127,7 @@ impl<'a> Rd<'a> {
                     let v = self.val(py, c, keys, geo)?;
                     d.set_item(keys.get(k).ok_or_else(|| PyValueError::new_err("bad key"))?.bind(py), v)?;
                 }
-                d.into_py(py)
+                d.into_any()
             }
             9 => { let x = i64::from_le_bytes(self.n::<8>()?); self.eid(py, c, x as i128)? }
             10 => { let x = u64::from_le_bytes(self.n::<8>()?); self.eid(py, c, x as i128)? }
@@ -104,37 +136,37 @@ impl<'a> Rd<'a> {
                 d.set_item(keys[crate::dec::K_HANDLE as usize].bind(py), self.u32()?)?;
                 if self.u8()? == 0 { d.set_item(keys[crate::dec::K_PTR as usize].bind(py), self.u32()?)?; } else { let g = self.str()?; d.set_item(keys[crate::dec::K_ES as usize].bind(py), g)?; }
                 if self.u8()? == 1 { let ob = self.val(py, c, keys, geo)?; d.set_item(keys[crate::dec::K_OBJ as usize].bind(py), ob)?; }
-                d.into_py(py)
+                d.into_any()
             }
-            12 => geo.clone().into_py(py),
+            12 => geo.clone().into_any(),
             t => return Err(PyValueError::new_err(format!("bad cache tag {}", t))),
         })
     }
 
-    pub fn rec<'py>(&mut self, py: Python<'py>, c: &Conv, keys: &[Py<PyString>], geo: &Bound<'py, PyString>) -> PyResult<Bound<'py, PyDict>> {
+    pub fn rec(&mut self, py: Python<'py>, c: &Conv, keys: &[Py<PyString>], geo: &Bound<'py, PyString>) -> PyResult<Bound<'py, PyDict>> {
         let id = self.u64()?;
         let tag = self.u32()?;
         let complete = self.u8()? != 0;
         let short = self.u8()? != 0;
         let slim = self.u8()? != 0;
         let d = PyDict::new_bound(py);
-        d.set_item("id", id)?;
+        d.set_item(pyo3::intern!(py, "id"), id)?;
         if slim {
-            d.set_item("class", c.cname(py, tag))?;
-            d.set_item("fields", PyDict::new_bound(py))?;
-            d.set_item("complete", complete)?;
+            d.set_item(pyo3::intern!(py, "class"), c.cname(py, tag))?;
+            d.set_item(pyo3::intern!(py, "fields"), PyDict::new_bound(py))?;
+            d.set_item(pyo3::intern!(py, "complete"), complete)?;
             return Ok(d);
         }
         let err: Option<&str> = if self.u8()? == 1 { Some(self.str()?) } else { None };
         let bodies: Option<Vec<u32>> = if self.u8()? == 1 { let n = self.u32()? as usize; let mut v = Vec::with_capacity(n); for _ in 0..n { v.push(self.u32()?); } Some(v) } else { None };
         let fields = self.val(py, c, keys, geo)?;
-        d.set_item("tag", tag)?;
-        d.set_item("class", c.cname(py, tag))?;
-        d.set_item("fields", fields)?;
-        d.set_item("complete", complete)?;
-        match err { Some(e) => d.set_item("error", e)?, None => d.set_item("error", py.None())? }
-        if let Some(b) = bodies { d.set_item("bodies", PyList::new_bound(py, b.iter().map(|t| c.cname(py, *t))))?; }
-        d.set_item("short", short)?;
+        d.set_item(pyo3::intern!(py, "tag"), tag)?;
+        d.set_item(pyo3::intern!(py, "class"), c.cname(py, tag))?;
+        d.set_item(pyo3::intern!(py, "fields"), fields)?;
+        d.set_item(pyo3::intern!(py, "complete"), complete)?;
+        match err { Some(e) => d.set_item(pyo3::intern!(py, "error"), e)?, None => d.set_item(pyo3::intern!(py, "error"), py.None())? }
+        if let Some(b) = bodies { d.set_item(pyo3::intern!(py, "bodies"), PyList::new_bound(py, b.iter().map(|t| c.cname(py, *t))))?; }
+        d.set_item(pyo3::intern!(py, "short"), short)?;
         Ok(d)
     }
 }

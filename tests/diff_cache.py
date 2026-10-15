@@ -8,9 +8,10 @@ bad = 0
 for f in sys.argv[1:]:
     os.environ.pop('RVT_CORE_NOCACHE', None); os.environ.pop('RVT_NOCACHE', None)
     m = RF.Model(f, progress=False); m.quick(); m.full()                      # make sure the caches exist
+    RF._SHARED.clear()                                                       # in-process share (extract_shared) off: test the binary cache itself
     t = time.time(); m = RF.Model(f, progress=False); m.quick(); xw, pw = m.full(); tw = time.time() - t
     os.environ['RVT_CORE_NOCACHE'] = '1'
-    m = RF.Model(f, progress=False); m.quick(); xc, pc = m.full()
+    RF._SHARED.clear(); m = RF.Model(f, progress=False); m.quick(); xc, pc = m.full()
     os.environ.pop('RVT_CORE_NOCACHE')
     nd = 0
     for k in ('recs', 'eh'):
