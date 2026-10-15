@@ -53,12 +53,13 @@ Per component, same machine (measured during development, single runs):
 | element meshes, 2,705 placed elements, 28 MB Structural | 291 s pure Python (est.), ~125 s Python mesh code on the fast Doc | 2.0 s (Rust, 6 threads) |
 | extraction reload, 40 MB (pickle of the same object: 1.0 s) | - | 1.0 s (.rvtc, mmap) |
 
-## Against the targets (2026-10-13, remote-host, other sessions active, load 3-6)
+## Against the targets (2026-10-13 / 2026-10-15, remote-host, other sessions active, load 3-12)
 | target | measured | status |
 |---|---|---|
 | 6 MB full model (table + extraction + params) first open < 2 s | 1.74-1.77 s (table 0.72-0.78 s) | met (was 2.3 s: GC frozen before re-enabling) |
 | 40 MB usable model < 8 s cold | table 1.5 s, full model 5.4 s with all meshes computing alongside | met |
-| cached full model < 0.5 s | 6 MB 0.51 s (was 0.94 s), 40 MB 1.7 s | 6 MB at target; 40 MB bound by building ~25M Python objects (the viewer reopens its own converted model instead) |
+| cached full model < 0.5 s | 2026-10-15, fresh process: 6 MB 0.45 s, 2020 Residential 0.34 s, 40 MB 0.9 s (was 1.7 s) | 6 MB met; 40 MB not met: the load builds ~4.5M Python objects (1.7M dicts, 0.9M lists, 1M ids, ...), CPython object construction is the floor (perf: Rust-side work ~20% of the load). The viewer reopens its own converted model, so this is not on the demo path. In-process repeats are free (extract_shared) |
+| viewer conversion, one extraction per process | 2024 Structural: 3 loads (Model, rvt_geometry.Ctx, rvt_rebar) -> 1 (rvt_fast.extract_shared + reference get_x_ro): 1.65 s -> 0.64 s | done 2026-10-15 |
 | all meshes, 40 MB first open | 12.1 s (2.9M triangles; the reference's curved-face refinement adds 38% triangles), warm 0.3 s | streamed |
 | viewer item 13 (Facades prefetch) | Rust stream 1.1 s of the stage; the rest was the viewer's refined_volume check: Rust drop-in 34 s -> 0.6 s | drop-in released |
 
