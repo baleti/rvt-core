@@ -45,3 +45,5 @@ per-triangle mat, params ports, curved refinement ports, refined_volume in Rust 
 * Read remote-host h1_summary.log: 0 DIFFERENT anywhere except Nanjing refvol (open, probe pending: remote-host MemAvailable 10.6 GB < 11 GB needed).
 * oracle_watch: rvt_params.py changed (circuit/wire/hub params, centre-line inheritance); params run the reference loop + Rust kernels, diff_params rst_basic IDENTICAL (0.69 s vs 1.76 s oracle); snapshot accepted. No release needed (no Rust change).
 * Viewer does not consume rvt_fast.Progress yet (it has its own progress.json): ask c5-viewer if wanted.
+* Item 4 (materials port) measured and closed: rst_basic appearance_table 6 ms (129 assets) + material_table 8 ms (92 materials) on top of the shared context; per-face material is already the Rust elemmesh `mat` path. A Rust port would save < 15 ms: not worth the parity risk.
+* Open for next agent: Nanjing 546245 probe (remote-host MemAvailable >= 11 GB), 40 MB cached full model 0.9 s (object-construction floor; lazy/mmap records would be the only way), viewer use of rvt_fast.Progress (optional).
