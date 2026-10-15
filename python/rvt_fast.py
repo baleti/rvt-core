@@ -810,3 +810,19 @@ def tessellate_geometry(geo):
         except Exception: pass
     import rvt_mesh
     return rvt_mesh.tessellate_geometry(geo)
+
+
+def index_handles(x):
+    """rvtsheets.gfx.Collector._index as one call: {handle: node dict} (see rvt_core.index_handles); Python walk when the extension is stale / off"""
+    if on() and hasattr(_rc(), 'index_handles'):
+        try: return _rc().index_handles(x)
+        except Exception: pass
+    out = {}
+    def walk(y):
+        if isinstance(y, dict):
+            if 'handle' in y and 'obj' in y and isinstance(y.get('handle'), int) and y['handle'] != 0xFFFFFFFF: out[y['handle']] = y
+            for v in y.values(): walk(v)
+        elif isinstance(y, list):
+            for v in y: walk(v)
+    walk(x)
+    return out

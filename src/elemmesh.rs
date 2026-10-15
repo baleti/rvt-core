@@ -741,3 +741,26 @@ pub fn tessellate_geometry_py<'py>(py: Python<'py>, geo: &Bound<'py, PyAny>) -> 
     d.set_item("frs", PyList::new_bound(py, frs))?;
     Ok(d)
 }
+
+/// rvtsheets.gfx.Collector._index: {handle: node dict} over every dict {'handle': int != 0xFFFFFFFF, 'obj': ...} found by a pre-order walk of dicts (values in order) and
+/// lists (tuples are not entered); a later node with the same handle replaces the earlier one. Keys and values are the original objects.
+#[pyfunction]
+pub fn index_handles<'py>(py: Python<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyDict>> {
+    use pyo3::types::PyInt;
+    let out = PyDict::new_bound(py);
+    let (kh, ko) = (pyo3::intern!(py, "handle"), pyo3::intern!(py, "obj"));
+    let mut st: Vec<Bound<'py, PyAny>> = vec![x.clone()];
+    while let Some(n) = st.pop() {
+        if let Ok(d) = n.downcast::<PyDict>() {
+            if let (Some(h), true) = (d.get_item(kh)?, d.contains(ko)?) {
+                if h.is_instance_of::<PyInt>() && h.ne(0xFFFF_FFFFu64)? { out.set_item(&h, d)?; }
+            }
+            let vals: Vec<Bound<'py, PyAny>> = d.values().iter().collect();
+            for v in vals.into_iter().rev() { if v.is_instance_of::<PyDict>() || v.is_instance_of::<PyList>() { st.push(v); } }
+        } else if let Ok(l) = n.downcast::<PyList>() {
+            let items: Vec<Bound<'py, PyAny>> = l.iter().collect();
+            for v in items.into_iter().rev() { if v.is_instance_of::<PyDict>() || v.is_instance_of::<PyList>() { st.push(v); } }
+        }
+    }
+    Ok(out)
+}
