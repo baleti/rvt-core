@@ -520,6 +520,8 @@ def _params_impl(path, x):
             ud = ((f.get('m_data') or {}).get('m_oUserData') or {}) if isinstance(f.get('m_data'), dict) else {}
             ud = ud.get('obj') if isinstance(ud, dict) and 'obj' in ud else ud
             if isinstance(ud, dict) and isinstance(ud.get('m_angle'), float): d['Slope'] = math.tan(ud['m_angle'])
+        wr = f.get('m_witnessRefs')
+        if isinstance(wr, list) and wr and 'Dim' in c: d['Count|Integer'] = len(wr)      # dimension strings: number of references
         hf = x['eh'].get(eid) or {}
         if UNIV: cid = hf.get('m_categroryId'); d['Category|ElementId'] = _sg(cid) if cid is not None else -1
         dop = hf.get('m_designOptionId', f.get('m_designOptionId')); dop = _sg(dop) if dop is not None else -1
@@ -552,7 +554,7 @@ def _params_impl(path, x):
     return out
 
 # sha1 of the rvt_params.py whose params() loop _params_impl mirrors; any other version runs the reference loop (with the Rust kernels) instead
-PARAMS_PORTED = '38d51a18828a8dd576901c47c0378f0e2567aa3f'
+PARAMS_PORTED = '2c5940f55e0ff07f47058b8372caa695bd5ffb41'
 def _params_drift():
     import hashlib
     try: return hashlib.sha1(open(os.path.join(READER, 'rvt_params.py'), 'rb').read()).hexdigest() != PARAMS_PORTED
