@@ -426,7 +426,7 @@ impl SurfEval {
     }
 }
 
-struct Py_ {
+pub(crate) struct Py_ {
     np: Py<PyAny>,
     earcut: Py<PyAny>,
 }
@@ -666,4 +666,78 @@ pub fn body_summary_core(py: Python<'_>, p: &[u8], nid: Vec<i64>, fid: Option<Ve
     let (rows, tb) = py.allow_threads(|| crate::refvol::body_summary_core(&v, &nid, fid.as_deref(), limit));
     let bytes: Vec<u8> = tb.iter().map(|x| *x as u8).collect();
     Ok((rows, PyBytes::new_bound(py, &bytes).unbind()))
+}
+
+
+// ---------------- rvt_mesh.tessellate_geometry on a Python dict (rvt-sheets, any caller holding decoded Geometry nodes) ----------------
+
+fn py_to_val(o: &Bound<'_, PyAny>, kk: &K, depth: u32) -> PyResult<Val> {
+    use pyo3::types::{PyBool, PyDict as D, PyFloat, PyInt, PyList as L, PyString, PyTuple as T, PyBytes as B};
+    if depth > 200 { return Err(pyo3::exceptions::PyRecursionError::new_err("geometry too deep")); }
+    if o.is_none() { return Ok(Val::None); }
+    if o.is_instance_of::<PyBool>() { return Ok(Val::I(o.extract::<bool>()? as i64)); }
+    if o.is_instance_of::<PyInt>() {
+        return Ok(match o.extract::<i64>() { Ok(v) => Val::I(v), Err(_) => Val::U(o.extract::<u64>()?) });
+    }
+    if o.is_instance_of::<PyFloat>() { return Ok(Val::F(o.extract::<f64>()?)); }
+    if o.is_instance_of::<PyString>() {
+        let s: String = o.extract()?;
+        return Ok(if s == "<geometry not decoded>" { Val::Geo } else { Val::S(s) });
+    }
+    if let Ok(b) = o.downcast::<B>() { return Ok(Val::B(b.as_bytes().to_vec())); }
+    if let Ok(l) = o.downcast::<L>() { return Ok(Val::L(l.iter().map(|x| py_to_val(&x, kk, depth + 1)).collect::<PyResult<_>>()?)); }
+    if let Ok(t) = o.downcast::<T>() { return Ok(Val::T(t.iter().map(|x| py_to_val(&x, kk, depth + 1)).collect::<PyResult<_>>()?)); }
+    if let Ok(d) = o.downcast::<D>() {
+        let mut out = Vec::with_capacity(d.len());
+        for (k, v) in d.iter() {
+            let ks: String = match k.extract() { Ok(s) => s, Err(_) => continue };
+            if let Some(id) = kk.m.get(ks.as_str()) { if *id != u32::MAX { out.push((*id, py_to_val(&v, kk, depth + 1)?)); } }
+        }
+        return Ok(Val::D(out));
+    }
+    // numpy scalars and other number-likes
+    if let Ok(v) = o.extract::<f64>() { return Ok(Val::F(v)); }
+    Err(pyo3::exceptions::PyTypeError::new_err(format!("unsupported value in geometry: {}", o.get_type().name()?)))
+}
+
+fn val_to_py(py: Python<'_>, v: &Val) -> PyObject {
+    match v {
+        Val::None => py.None(),
+        Val::I(x) | Val::EI(x) => x.into_py(py),
+        Val::U(x) | Val::EU(x) => x.into_py(py),
+        Val::F(x) => x.into_py(py),
+        Val::S(s) => s.into_py(py),
+        _ => py.None(),
+    }
+}
+
+/// rvt_mesh.tessellate_geometry(geo) for a decoded Geometry node (Python dicts, pointer slots already resolved as {'handle','ptr','obj'}):
+/// dict(tris = float64 array (n, 3, 3), unsupported = [kinds], faces = n, fidx = [face number per triangle], fprio = {face number: bool}, frs = [m_renderStyleId per triangle]).
+/// `meta` (surface evaluators) is not returned. Raises KeyError where the reference raises.
+#[pyfunction]
+#[pyo3(name = "tessellate_geometry")]
+pub fn tessellate_geometry_py<'py>(py: Python<'py>, geo: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyDict>> {
+    let kk = K::standalone();
+    let g = py_to_val(geo, &kk, 0)?;
+    let pp = Arc::new(Py_ { np: py.import_bound("numpy")?.unbind().into_any(), earcut: py.import_bound("mapbox_earcut")?.getattr("triangulate_float64")?.unbind() });
+    let t = py.allow_threads(|| {
+        let ec = |r: &[(&[UV], &[u32])]| earcut_py(&pp, r);
+        crate::mesh::tessellate_geometry(&kk, &g, &ec)
+    });
+    let t = t.map_err(|_| PyKeyError::new_err("tessellate_geometry raised in the reference path"))?;
+    let d = PyDict::new_bound(py);
+    let np = pp.np.bind(py);
+    let mut b = Vec::with_capacity(t.tris.len() * 72);
+    for tr in &t.tris { for p in tr { for x in p { b.extend_from_slice(&x.to_le_bytes()); } } }
+    let arr = np.getattr("frombuffer")?.call1((PyBytes::new_bound(py, &b), "<f8"))?.call_method1("reshape", (-1, 3, 3))?.call_method0("copy")?;
+    d.set_item("tris", arr)?;
+    d.set_item("unsupported", PyList::new_bound(py, &t.unsup))?;
+    d.set_item("faces", t.faces)?;
+    d.set_item("fidx", PyList::new_bound(py, &t.fidx))?;
+    let fp = PyDict::new_bound(py);
+    for (k, v) in &t.fprio { fp.set_item(*k, *v)?; }
+    d.set_item("fprio", fp)?;
+    let frs: Vec<PyObject> = t.fidx.iter().map(|f| if *f >= 1 && (*f as usize) <= t.frs.len() { val_to_py(py, &t.frs[*f as usize - 1]) } else { py.None() }).collect();
+    d.set_item("frs", PyList::new_bound(py, frs))?;
+    Ok(d)
 }
