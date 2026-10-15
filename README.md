@@ -72,7 +72,7 @@ Zero differences in every completed comparison except one refined_volume case (b
 | channel-103 index + records | 78 identical | 24 identical |
 | parameters | 77 identical, 1 pending | 24 identical |
 | element meshes (300 per file, every file, bit-identical incl. per-triangle material) | 77 identical, 1 pending | 24 identical |
-| refined_volume (to 1e-9) | 77 identical, 1 pending | 23 identical, 1 different on remote-host only (2011 Nanjing element 546245: identical on remote-host) |
+| refined_volume (to 1e-9) | 77 identical, 1 pending | 24 identical (2011 Nanjing 546245 differed in an earlier remote-host run from a stale snapshot; rerun 2026-10-15 19:07 on remote-host: 0.52205 in both, pole distance exactly 0) |
 * Params (since 2026-10-15): always the reference rvt_params.params loop with the Rust kernels (FlatSrc / resolve / ifc_stored), so every reference edit is live; rst_basic 1.6 s -> 0.7 s. The old hand mirror is opt-in (RVT_CORE_PARAMS_MIRROR=1, only for the rvt_params.py it was ported from).
 * Meshes mirror rvt_mesh / rvt_elemmesh of 2026-10-13 (morning); newer edits are ported as they are logged (PYTHON_REFERENCE_CHANGES.md).
 * Cross-machine: the reference is not bit-reproducible across CPUs (numpy SIMD): remote-host lines marked "geometrically equivalent" are the reference varying, not the port.
