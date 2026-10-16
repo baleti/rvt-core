@@ -196,7 +196,12 @@ pub fn decode_all(s: &Schema, chunk: &[u8], cands: &[usize], p: &Params, claim: 
                     let r1 = if matches!(r0, Some(Out::Accept(_))) || skip1 { None } else { Some(decode_variant(dec, chunk, i, true, ts, eid, p)) };
                     if let Some(t0) = t0 {
                         let dt = t0.elapsed();
-                        if dt.as_micros() > 2000 { eprintln!("rvt_core slow candidate at {} eid {} tags {} {} {:?} accepted {} {} big {} {}", i, eid, dec.s.cname(tl), dec.s.cname(ts), dt, matches!(r0, Some(Out::Accept(_))), matches!(r1, Some(Out::Accept(_))), dec.big.0, dec.big.1); }
+                        if dt.as_micros() > 2000 { let why = if matches!(r0, Some(Out::Reject)) {
+                            dec.quiet = false; let big = dec.big.clone();
+                            let w = match dec.record(chunk, i, false) { Ok((r, np)) => format!("ok complete {} error {:?} id {} consumed {}", r.complete, r.error.as_ref().map(|e| e.chars().take(80).collect::<String>()), r.id, np - i), Err(e) => format!("err {:?}", e) };
+                            dec.quiet = true; dec.big = big; w
+                        } else { String::new() };
+                        eprintln!("rvt_core slow candidate at {} eid {} tags {} {} {:?} accepted {} {} big {} {} why [{}]", i, eid, dec.s.cname(tl), dec.s.cname(ts), dt, matches!(r0, Some(Out::Accept(_))), matches!(r1, Some(Out::Accept(_))), dec.big.0, dec.big.1, why); }
                     }
                     out.push(Cand { eid, tags: [tl, ts], res: [r0, r1] });
                 }

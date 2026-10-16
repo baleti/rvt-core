@@ -196,6 +196,7 @@ impl Rec {
     }
 }
 
+#[derive(Debug)]
 pub enum DErr {
     /// rvt_decode.Desync
     Desync(String),

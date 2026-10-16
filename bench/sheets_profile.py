@@ -2,7 +2,7 @@
 usage: sheets_profile.py FILE [--prof]   (host1 via h1run: python = the rvt env python)"""
 import os, sys, time, cProfile, pstats
 sys.path.insert(0, os.path.expanduser('~/src/rvt-sheets-dev')); sys.path.insert(0, os.path.expanduser('~/rvt-research'))
-sys.path.insert(0, os.path.expanduser('~/src/rvt-core/python'))
+sys.path.insert(0, os.environ.get('RVT_FAST_DIR') or os.path.expanduser('~/src/rvt-core/python'))
 f = os.path.abspath(sys.argv[1]); prof = '--prof' in sys.argv
 def stage(name, fn):
     t = time.time(); r = fn(); print('%-28s %6.2fs' % (name, time.time() - t), flush=True); return r

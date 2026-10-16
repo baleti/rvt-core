@@ -286,7 +286,13 @@ def _doc_class():
             return s._cen
         def rec(s, eid):
             i = s.res.get(eid)
-            return s._g.record(i) if i else None
+            if not i: return None
+            m = s.__dict__.get('_rmemo')
+            if m is None and os.environ.get('RVT_FAST_REC_MEMO'): m = s._rmemo = {}      # opt-in: callers promise not to mutate the returned record (rvt-sheets walks symbol records many times)
+            if m is None: return s._g.record(i)
+            r = m.get(eid)
+            if r is None: r = m[eid] = s._g.record(i)
+            return r
     return Doc
 
 _DOC = None
