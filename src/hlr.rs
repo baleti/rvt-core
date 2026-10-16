@@ -84,3 +84,40 @@ pub fn hlr_raster(py: Python<'_>, tris_ptr: usize, n: usize, w: usize, h: usize,
     });
     Ok(())
 }
+
+/// rvtsheets.hlr._visible: segs (m,2,3) float64, out (m, n_samp) uint8 (1 = visible); zb (H, W) float64. Same arithmetic as the numba kernel; segments run in parallel.
+#[pyfunction]
+pub fn hlr_visible(py: Python<'_>, segs_ptr: usize, m: usize, n_samp: usize, u0: f64, v0: f64, px: f64, zb_ptr: usize, w: usize, h: usize, eps: f64, out_ptr: usize) -> PyResult<()> {
+    // SAFETY: the Python wrapper keeps the arrays alive and sized m*6 / h*w float64 / m*n_samp uint8
+    let segs: &[f64] = unsafe { std::slice::from_raw_parts(segs_ptr as *const f64, m * 6) };
+    let zb: &[f64] = unsafe { std::slice::from_raw_parts(zb_ptr as *const f64, h * w) };
+    let out: &mut [u8] = unsafe { std::slice::from_raw_parts_mut(out_ptr as *mut u8, m * n_samp) };
+    let (wi, hi) = (w as i64, h as i64);
+    let one = |s: &[f64], o: &mut [u8]| {
+        for k in 0..n_samp {
+            let t = (k as f64 + 0.5) / n_samp as f64;
+            let u = s[0] + t * (s[3] - s[0]);
+            let v = s[1] + t * (s[4] - s[1]);
+            let wd = s[2] + t * (s[5] - s[2]);
+            let xx = ((u - u0) / px) as i64;
+            let yy = ((v - v0) / px) as i64;
+            let mut vis = true;
+            for dy in -1..2i64 {
+                for dx in -1..2i64 {
+                    let (x, y) = (xx + dx, yy + dy);
+                    if x < 0 || y < 0 || x >= wi || y >= hi { continue; }
+                    if zb[(y * wi + x) as usize] > wd + eps { vis = false; }
+                }
+            }
+            o[k] = vis as u8;
+        }
+    };
+    py.allow_threads(|| {
+        if m * n_samp < 4096 {
+            for (s, o) in segs.chunks_exact(6).zip(out.chunks_mut(n_samp.max(1))) { one(s, o); }
+        } else {
+            crate::pool::run(|| segs.par_chunks_exact(6).zip(out.par_chunks_mut(n_samp.max(1))).for_each(|(s, o)| one(s, o)));
+        }
+    });
+    Ok(())
+}

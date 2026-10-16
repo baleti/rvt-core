@@ -150,6 +150,7 @@ fn rvt_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(elemmesh::tessellate_geometry_py, m)?)?;
     m.add_function(wrap_pyfunction!(elemmesh::index_handles, m)?)?;
     m.add_function(wrap_pyfunction!(hlr::hlr_raster, m)?)?;
+    m.add_function(wrap_pyfunction!(hlr::hlr_visible, m)?)?;
     m.add_function(wrap_pyfunction!(elemmesh::body_summary_core, m)?)?;
     m.add_function(wrap_pyfunction!(elemmesh::refine_curved_dbg, m)?)?;
     m.add_function(wrap_pyfunction!(joined, m)?)?;
