@@ -832,3 +832,15 @@ def index_handles(x):
             for v in y: walk(v)
     walk(x)
     return out
+
+
+def hlr_raster(tris, W, H, u0, v0, px, zb):
+    """rvtsheets.hlr._raster in Rust (row bands in parallel, bit-identical max-depth buffer): tris (n,3,3) float, zb (H, W) C-contiguous float64 modified in place.
+    Returns True when done; False (nothing touched) when the extension is stale / off or the buffer is not a plain float64 C array: the caller then runs its own code."""
+    import numpy as np
+    if not (on() and hasattr(_rc(), 'hlr_raster')): return False
+    if not (isinstance(zb, np.ndarray) and zb.dtype == np.float64 and zb.flags['C_CONTIGUOUS'] and zb.flags['WRITEABLE'] and zb.shape == (H, W)): return False
+    t = np.ascontiguousarray(tris, dtype=np.float64)
+    if t.ndim != 3 or t.shape[1:] != (3, 3): return False
+    _rc().hlr_raster(t.ctypes.data, len(t), int(W), int(H), float(u0), float(v0), float(px), zb.ctypes.data)
+    return True
