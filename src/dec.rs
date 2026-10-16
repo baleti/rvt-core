@@ -268,6 +268,8 @@ pub struct Dec<'s> {
     pub lazy_str: bool,
     /// extraction: stop decoding a record as soon as its top-level m_id is decoded and differs (the record would be rejected anyway)
     pub abort_mid: Option<u64>,
+    /// diagnostics (RVT_CORE_SLOW): largest element count seen in one record and where
+    pub big: (usize, String),
 }
 
 impl<'s> Dec<'s> {
@@ -275,7 +277,11 @@ impl<'s> Dec<'s> {
         let mut defined = FxHashSet::default();
         defined.insert(1);
         defined.insert(2);
-        Dec { s, defined, visited: vec![], err: None, path: vec![], slots: vec![], strcap: s.strcap, quiet: false, lazy_str: false, abort_mid: None }
+        Dec { s, defined, visited: vec![], err: None, path: vec![], slots: vec![], strcap: s.strcap, quiet: false, lazy_str: false, abort_mid: None, big: (0, String::new()) }
+    }
+
+    #[inline] fn note_big(&mut self, n: usize) {
+        if n > 20_000 && n > self.big.0 && crate::extract::SLOW.load(std::sync::atomic::Ordering::Relaxed) { let ps = self.path_str(); self.big = (n, ps); }
     }
 
     fn path_str(&self) -> String {
@@ -343,6 +349,7 @@ impl<'s> Dec<'s> {
                 cnt = self.u32at(b, p)? as usize;
                 p += 4;
                 if cnt > 1_000_000 { return Err(DErr::Desync(format!("array count {}", cnt))); }
+                self.note_big(cnt);
             }
             let mut out = Vec::with_capacity(cnt.min(4096));
             for _ in 0..cnt {
@@ -373,6 +380,7 @@ impl<'s> Dec<'s> {
                 p += 4;
                 if n == 0xffff_ffff { return Ok((Val::None, p)); }
                 if n > 1_000_000 { return Err(DErr::Desync(format!("set count {} at {} ({})", n, p - 4, self.path_str()))); }
+                self.note_big(n as usize);
                 let stars = if matches!(fl & 0x0f, 1 | 2 | 3) { fl & 0x0f } else { 1 };
                 let mut out = Vec::with_capacity(n as usize);
                 for _ in 0..n {
@@ -389,6 +397,7 @@ impl<'s> Dec<'s> {
                 p += 4;
                 if n == 0xffff_ffff { return Ok((Val::None, p)); }
                 if n > 1_000_000 { return Err(DErr::Desync(format!("vector count {} at {} ({})", n, p - 4, self.path_str()))); }
+                self.note_big(n as usize);
                 let mut out = Vec::with_capacity((n as usize).min(4096));
                 for _ in 0..n {
                     let (v, np) = self.struct_(b, p, rf - 12, pend, None)?;
@@ -408,6 +417,7 @@ impl<'s> Dec<'s> {
                 return Ok((Val::B(b[p..p + n].to_vec()), p + n));
             }
             if n > 1_000_000 { return Err(DErr::Desync(format!("prim vector count {}", n))); }
+            self.note_big(n);
             let mut out = Vec::with_capacity(n.min(1 << 16));
             for _ in 0..n {
                 let (v, np) = self.prim(b, p, kind)?;

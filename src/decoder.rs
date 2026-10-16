@@ -356,6 +356,7 @@ impl RecDecoder {
         // batches of candidates: decode + first-wins merge (state carried over), then the newly accepted records are serialised, converted and dropped,
         // so only one batch of decoded trees is alive (2020 rme_advanced: 775k candidates, > 4 GB when decoded at once)
         let mut st = extract::MergeState::default();
+        let claim = extract::Claim::default();
         let mut block: Vec<u8> = vec![];
         let lr = PyList::empty_bound(py);
         let le = PyList::empty_bound(py);
@@ -364,7 +365,7 @@ impl RecDecoder {
         for part in cands.chunks(2048) {
             let (recs, ehs, b) = py.allow_threads(|| {
                 let td = std::time::Instant::now();
-                let dec = extract::decode_all(&s, chunk, part, &p);
+                let dec = extract::decode_all(&s, chunk, part, &p, Some(&claim));
                 let td1 = td.elapsed();
                 extract::merge_into(&s, chunk, part, dec, &p, &mut st);
                 if tm { tdec_ns.fetch_add(td1.as_nanos() as u64, std::sync::atomic::Ordering::Relaxed); tmerge_ns.fetch_add((td.elapsed() - td1).as_nanos() as u64, std::sync::atomic::Ordering::Relaxed); }
