@@ -152,7 +152,12 @@ pub fn decode_variant(dec: &mut Dec, chunk: &[u8], i: usize, short: bool, tag: u
 }
 
 /// decode every candidate (long header; short header when the long one is not accepted) in parallel
-pub fn decode_all(s: &Schema, chunk: &[u8], cands: &[usize], p: &Params) -> Vec<Cand> {
+/// `claim`: (eid, canonical tag | HDR) -> lowest candidate offset whose FIRST variant (long header) was accepted. The merge keeps the first accepted record of a key, so a variant
+/// whose key was accepted by an earlier candidate is never used (it `continue`s / `break`s before looking at the result) and is not decoded: 2017 rme_advanced has ~150 false or
+/// repeated ElementHeader candidates (garbage counts like 851968) of 0.3-0.9 s each. Only variant 0 claims (its accept is always taken or already taken in the merge).
+pub type Claim = std::sync::RwLock<FxHashMap<(u64, u32), usize>>;
+const HDR: u32 = u32::MAX;
+pub fn decode_all(s: &Schema, chunk: &[u8], cands: &[usize], p: &Params, claim: Option<&Claim>) -> Vec<Cand> {
     let w = p.w;
     crate::pool::run(|| cands
         .par_chunks(8)
@@ -171,13 +176,29 @@ pub fn decode_all(s: &Schema, chunk: &[u8], cands: &[usize], p: &Params) -> Vec<
                         }
                     }
                     let t0 = if SLOW.load(std::sync::atomic::Ordering::Relaxed) { Some(std::time::Instant::now()) } else { None };
-                    let r0 = decode_variant(dec, chunk, i, false, tl, eid, p);
-                    let r1 = if matches!(r0, Out::Accept(_)) { None } else { Some(decode_variant(dec, chunk, i, true, ts, eid, p)) };
+                    dec.big = (0, String::new());
+                    let key_of = |tag: u32| -> Option<(u64, u32)> {
+                        match p.kinds.get(tag as usize).copied().unwrap_or(TagKind::Other) {
+                            TagKind::Wanted => Some((eid, p.canon[tag as usize])),
+                            TagKind::Header => Some((eid, HDR)),
+                            TagKind::Other => None,
+                        }
+                    };
+                    let taken = |tag: u32| -> bool {
+                        let cl = match claim { Some(c) => c, None => return false };
+                        match key_of(tag) { Some(k) => cl.read().map_or(false, |m| m.get(&k).map_or(false, |&pos| pos < i)), None => false }
+                    };
+                    let (skip0, skip1) = (taken(tl), taken(ts));
+                    let r0 = if skip0 { None } else { Some(decode_variant(dec, chunk, i, false, tl, eid, p)) };
+                    if let (Some(Out::Accept(_)), Some(cl), Some(k)) = (&r0, claim, key_of(tl)) {
+                        if let Ok(mut m) = cl.write() { let e = m.entry(k).or_insert(i); if i < *e { *e = i; } }
+                    }
+                    let r1 = if matches!(r0, Some(Out::Accept(_))) || skip1 { None } else { Some(decode_variant(dec, chunk, i, true, ts, eid, p)) };
                     if let Some(t0) = t0 {
                         let dt = t0.elapsed();
-                        if dt.as_micros() > 2000 { eprintln!("rvt_core slow candidate at {} eid {} tags {} {} {:?} accepted {} {}", i, eid, dec.s.cname(tl), dec.s.cname(ts), dt, matches!(r0, Out::Accept(_)), matches!(r1, Some(Out::Accept(_)))); }
+                        if dt.as_micros() > 2000 { eprintln!("rvt_core slow candidate at {} eid {} tags {} {} {:?} accepted {} {} big {} {}", i, eid, dec.s.cname(tl), dec.s.cname(ts), dt, matches!(r0, Some(Out::Accept(_))), matches!(r1, Some(Out::Accept(_))), dec.big.0, dec.big.1); }
                     }
-                    out.push(Cand { eid, tags: [tl, ts], res: [Some(r0), r1] });
+                    out.push(Cand { eid, tags: [tl, ts], res: [r0, r1] });
                 }
                 out
             },
@@ -205,8 +226,9 @@ pub struct MergeState {
 /// decode + merge in batches of candidates (same order, same state as one pass): only one batch of decoded trees (incl. duplicates the merge rejects) is alive
 pub fn decode_merge(s: &Schema, chunk: &[u8], cands: &[usize], p: &Params, batch: usize) -> (Vec<((u64, u32), Rec)>, Vec<(u64, Rec)>) {
     let mut st = MergeState::default();
+    let claim = Claim::default();
     for part in cands.chunks(batch.max(1)) {
-        let dec = decode_all(s, chunk, part, p);
+        let dec = decode_all(s, chunk, part, p, Some(&claim));
         merge_into(s, chunk, part, dec, p, &mut st);
     }
     (st.recs, st.ehs)
@@ -226,7 +248,13 @@ pub fn merge_into(s: &Schema, chunk: &[u8], cands: &[usize], mut decoded: Vec<Ca
                 TagKind::Wanted => {
                     let key = (c.eid, p.canon[tag as usize]);
                     if rkeys.contains(&key) {
-                        if v == 0 && c.res[1].is_none() {
+                        let t1 = c.tags[1];
+                        let t1_taken = match p.kinds.get(t1 as usize).copied().unwrap_or(TagKind::Other) {
+                            TagKind::Wanted => rkeys.contains(&(c.eid, p.canon[t1 as usize])),
+                            TagKind::Header => ekeys.contains(&c.eid),
+                            TagKind::Other => false,
+                        };
+                        if v == 0 && c.res[1].is_none() && !t1_taken {
                             c.res[1] = Some(decode_variant(&mut dec, chunk, cands[ci], true, c.tags[1], c.eid, p));
                         }
                         continue;
