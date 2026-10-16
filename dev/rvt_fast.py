@@ -857,3 +857,28 @@ def hlr_raster(tris, W, H, u0, v0, px, zb):
     if t.ndim != 3 or t.shape[1:] != (3, 3): return False
     _rc().hlr_raster(t.ctypes.data, len(t), int(W), int(H), float(u0), float(v0), float(px), zb.ctypes.data)
     return True
+
+
+def hlr_visible(segs, n_samp, u0, v0, px, zb, eps, out):
+    """rvtsheets.hlr._visible in Rust (bit-identical visibility flags): segs (m,2,3) float64 C-contiguous, zb (H, W) float64 C-contiguous, out (m, n_samp) bool/uint8 C-contiguous
+    written in place. True when done, False (nothing touched) when the extension is stale / off or an array has the wrong dtype / layout: the caller runs its own kernel."""
+    import numpy as np
+    if not (on() and hasattr(_rc(), 'hlr_visible')): return False
+    ok = (isinstance(segs, np.ndarray) and segs.dtype == np.float64 and segs.flags['C_CONTIGUOUS'] and segs.ndim == 3 and segs.shape[1:] == (2, 3)
+          and isinstance(zb, np.ndarray) and zb.dtype == np.float64 and zb.flags['C_CONTIGUOUS'] and zb.ndim == 2
+          and isinstance(out, np.ndarray) and out.dtype.itemsize == 1 and out.flags['C_CONTIGUOUS'] and out.flags['WRITEABLE'] and out.shape == (len(segs), n_samp))
+    if not ok: return False
+    if len(segs) == 0 or n_samp == 0: return True
+    _rc().hlr_visible(segs.ctypes.data, len(segs), int(n_samp), float(u0), float(v0), float(px), zb.ctypes.data, zb.shape[1], zb.shape[0], float(eps), out.ctypes.data)
+    return True
+
+
+def feature_edges(T, cosmax):
+    """rvtsheets.viewdraw._feature_edges(T, None) in Rust (same edges, same first-seen order, rounded coordinates): T (n,3,3) float, cosmax = cos(feature angle).
+    Returns a float64 array (k, 2, 3), or None when the extension is stale / off (the caller then runs its own code)."""
+    import numpy as np
+    if not (on() and hasattr(_rc(), 'feature_edges')): return None
+    t = np.ascontiguousarray(T, dtype=np.float64)
+    if t.ndim != 3 or t.shape[1:] != (3, 3): return None
+    if len(t) == 0: return np.zeros((0, 2, 3))
+    return np.frombuffer(_rc().feature_edges(t.ctypes.data, len(t), float(cosmax)), dtype=np.float64).reshape(-1, 2, 3).copy()

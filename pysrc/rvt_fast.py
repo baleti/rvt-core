@@ -32,8 +32,20 @@ def _rc():
 
 def _decoder_default_config():
     """the Rust decoder implements rvt_decode.Dec's default configuration only"""
+    import time
+    env = (os.environ.get('RVT_GG', '0'), os.environ.get('RVT_M'), os.environ.get('RVT_K5'))
+    now = time.monotonic()
+    if _DCFG[0] is not None and _DCFG[0][0] == env and now - _DCFG[2] < 1.0: return _DCFG[1]       # hints file re-checked at most once a second
     import rvt_decode as D
-    return not (D.load_hints() or os.environ.get('RVT_GG', '0') != '0' or os.environ.get('RVT_M') or os.environ.get('RVT_K5'))
+    try: st = os.stat(os.path.join(os.path.dirname(os.path.abspath(D.__file__)), 'rvt_hints.json')); sig = (st.st_mtime_ns, st.st_size)
+    except OSError: sig = None
+    key = (env, sig)
+    if _DCFG[0] == key:
+        _DCFG[2] = now; return _DCFG[1]                       # on() runs on every hook call (113k times in one sheets render): the hints file is parsed again only when it changed
+    r = not (D.load_hints() or env[0] != '0' or env[1] or env[2])
+    _DCFG[0], _DCFG[1], _DCFG[2] = key, r, now
+    return r
+_DCFG = [None, None, 0.0]
 
 def _pk_write(fn, obj):
     """write one .pk cache file atomically and drop older versions of the same kind for the same file (<key>-<kind><version>.pk)"""
@@ -871,3 +883,14 @@ def hlr_visible(segs, n_samp, u0, v0, px, zb, eps, out):
     if len(segs) == 0 or n_samp == 0: return True
     _rc().hlr_visible(segs.ctypes.data, len(segs), int(n_samp), float(u0), float(v0), float(px), zb.ctypes.data, zb.shape[1], zb.shape[0], float(eps), out.ctypes.data)
     return True
+
+
+def feature_edges(T, cosmax):
+    """rvtsheets.viewdraw._feature_edges(T, None) in Rust (same edges, same first-seen order, rounded coordinates): T (n,3,3) float, cosmax = cos(feature angle).
+    Returns a float64 array (k, 2, 3), or None when the extension is stale / off (the caller then runs its own code)."""
+    import numpy as np
+    if not (on() and hasattr(_rc(), 'feature_edges')): return None
+    t = np.ascontiguousarray(T, dtype=np.float64)
+    if t.ndim != 3 or t.shape[1:] != (3, 3): return None
+    if len(t) == 0: return np.zeros((0, 2, 3))
+    return np.frombuffer(_rc().feature_edges(t.ctypes.data, len(t), float(cosmax)), dtype=np.float64).reshape(-1, 2, 3).copy()
