@@ -419,11 +419,19 @@ pub fn surface_eval(kk: &K, s: &Val) -> Rs<Option<(SKind, Surf)>> {
 pub struct EdgeMap<'a> {
     pub order: Vec<i128>,
     pub map: FxHashMap<i128, &'a Val>,
+    /// face handle -> edges bordering it, in `order` (the reference's _face_edges index; the old per-face scan of all edges was O(faces x edges))
+    pub by_face: FxHashMap<i128, Vec<i128>>,
+}
+impl<'a> EdgeMap<'a> {
+    /// edges to look at for face h (callers still test the face position inside the edge): the index entry, or every edge for a face without a handle
+    #[inline] pub fn face_edges(&self, h: Option<i128>) -> &[i128] {
+        match h { Some(hv) => self.by_face.get(&hv).map_or(&[][..], |v| &v[..]), None => &self.order }
+    }
 }
 
 /// rvt_mesh._edge_map: stack walk (pop from the end, push dict values / list items in order)
 pub fn edge_map<'a>(kk: &K, geo: &'a Val) -> EdgeMap<'a> {
-    let mut em = EdgeMap { order: vec![], map: FxHashMap::default() };
+    let mut em = EdgeMap { order: vec![], map: FxHashMap::default(), by_face: FxHashMap::default() };
     let kfl = kk.k("m_firstAndLastEdgePnts");
     let mut st: Vec<&'a Val> = vec![geo];
     while let Some(z) = st.pop() {
@@ -440,6 +448,12 @@ pub fn edge_map<'a>(kk: &K, geo: &'a Val) -> EdgeMap<'a> {
             }
             Val::L(l) => { for b in l { st.push(b); } }
             _ => {}
+        }
+    }
+    for &eid in &em.order {
+        for r in refs_of(kk, em.map[&eid]).into_iter().flatten() {
+            let l = em.by_face.entry(r).or_default();
+            if l.last() != Some(&eid) { l.push(eid); }
         }
     }
     em
@@ -527,7 +541,7 @@ pub fn face_loops_uv(kk: &K, h: Option<i128>, edges: &EdgeMap, surfs: Option<&Fx
     let kfl = kk.k("m_firstAndLastEdgePnts");
     let kint = kk.k("m_interiorEdgePnts");
     let mut mine: Vec<(i128, Mine)> = vec![];
-    for &eid in &edges.order {
+    for &eid in edges.face_edges(h) {
         let e = edges.map[&eid];
         let refs = refs_of(kk, e);
         let side = match refs.iter().position(|r| *r == h) { Some(s) => s, None => continue };
@@ -1187,7 +1201,7 @@ pub fn tessellate(kk: &K, faces: &[&Val], edges: &EdgeMap, earcut: Earcut) -> Rs
             if let Some((c0, c1)) = c {
                 if c1[0] > c0[0] && c1[1] > c0[1] {
                     let mut on_rect = true;
-                    for &eid in &edges.order {
+                    for &eid in edges.face_edges(h) {
                         let e_ = edges.map[&eid];
                         let rf = refs_of(kk, e_);
                         let sd = match rf.iter().position(|r| *r == h) { Some(s) => s, None => continue };

@@ -360,10 +360,14 @@ impl RecDecoder {
         let lr = PyList::empty_bound(py);
         let le = PyList::empty_bound(py);
         let mut tconv = std::time::Duration::ZERO;
+        let (tdec_ns, tmerge_ns) = (std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0));
         for part in cands.chunks(2048) {
             let (recs, ehs, b) = py.allow_threads(|| {
+                let td = std::time::Instant::now();
                 let dec = extract::decode_all(&s, chunk, part, &p);
+                let td1 = td.elapsed();
                 extract::merge_into(&s, chunk, part, dec, &p, &mut st);
+                if tm { tdec_ns.fetch_add(td1.as_nanos() as u64, std::sync::atomic::Ordering::Relaxed); tmerge_ns.fetch_add((td.elapsed() - td1).as_nanos() as u64, std::sync::atomic::Ordering::Relaxed); }
                 let recs = std::mem::take(&mut st.recs);
                 let ehs = std::mem::take(&mut st.ehs);
                 let b = if want_block {
@@ -388,7 +392,7 @@ impl RecDecoder {
             }
             tconv += tc.elapsed();
         }
-        if tm { eprintln!("rvt_core extract: {} bytes, {} candidates: scan {:?} decode+merge+convert {:?} (to python {:?})", chunk.len(), cands.len(), t1, t0.elapsed() - t1, tconv); }
+        if tm { eprintln!("rvt_core extract: {} bytes, {} candidates: scan {:?} decode+merge+convert {:?} (to python {:?}) decode {:.2}s merge {:.2}s threads {}", chunk.len(), cands.len(), t1, t0.elapsed() - t1, tconv, tdec_ns.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e9, tmerge_ns.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e9, rayon::current_num_threads()); }
         if keep {
             if let Some(sk) = self.sink.as_mut() { sk.extend_from_slice(&block); }
             if let Some(k) = self.kept.as_mut() { k.push(block); }
