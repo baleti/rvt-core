@@ -45,6 +45,18 @@ pub fn hlr_raster(py: Python<'_>, tris_ptr: usize, n: usize, w: usize, h: usize,
     // SAFETY: the Python wrapper keeps both numpy arrays alive and sized n*9 / h*w float64 for the duration of the call
     let tris: &[f64] = unsafe { std::slice::from_raw_parts(tris_ptr as *const f64, n * 9) };
     let zb: &mut [f64] = unsafe { std::slice::from_raw_parts_mut(zb_ptr as *mut f64, h * w) };
+    // small jobs (most calls: a few thousand pixels of triangle area) run on the calling thread: the pool hand-off and the per-band triangle scans cost more than they save
+    let mut work = 0.0f64;
+    for t in tris.chunks_exact(9) {
+        let (xa, xb) = (t[0].min(t[3]).min(t[6]), t[0].max(t[3]).max(t[6]));
+        let (ya, yb) = (t[1].min(t[4]).min(t[7]), t[1].max(t[4]).max(t[7]));
+        work += ((xb - xa) / px + 1.0).min(w as f64) * ((yb - ya) / px + 1.0).min(h as f64);
+        if work > 400_000.0 { break; }
+    }
+    if work <= 400_000.0 {
+        py.allow_threads(|| raster_band(tris, w as i64, h as i64, u0, v0, px, 0, h as i64, zb));
+        return Ok(());
+    }
     let band = ((h + 31) / 32).max(16);
     py.allow_threads(|| {
         crate::pool::run(|| {
