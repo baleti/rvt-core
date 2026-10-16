@@ -63,6 +63,15 @@ Per component, same machine (measured during development, single runs):
 | all meshes, 40 MB first open | 12.1 s (2.9M triangles; the reference's curved-face refinement adds 38% triangles), warm 0.3 s | streamed |
 | viewer item 13 (Facades prefetch) | Rust stream 1.1 s of the stage; the rest was the viewer's refined_volume check: Rust drop-in 34 s -> 0.6 s | drop-in released |
 
+## Sheets-path entry points and 2026-10-16 fixes (c5-rust)
+| item | result |
+|---|---|
+| `rvt_fast.tessellate_geometry(geo dict)` (rvt-sheets `_tess`) | bit-identical triangles / fidx / frs / fprio on 20 files (2017-2026, ~9500 Geometry nodes), 13-41x; `tests/diff_tess.py` |
+| `rvt_fast.index_handles(fields)` (rvt-sheets `gfx._index`) | identical keys, order and node objects, 4000 records x 3 files, ~3.5x; `tests/diff_index.py` |
+| rvt-sheets render of 2020 Residential (6 views/sheets, host1) | 101 s -> 27 s with the tessellator, index_handles and the vectorised hatch (`bench/sheets_profile.py`) |
+| face -> edge index in the Rust tessellator (reference `_face_edges`) | 2026 Site: 150 meshes bit-identical, mesh stage 5.8 s vs 18.2 s reference |
+| 2017 rme_advanced cold extract | 43 s -> 9.7 s: false/repeated ElementHeader candidates are skipped once an earlier candidate has claimed the key; extract digests identical released vs new on all 102 files (`tests/cmp_builds.sh`) |
+
 ## Differential status (reference = pure Python, released builds, host1 logs 2026-10-15)
 Zero differences in every comparison over the whole main corpus (78 files, 2017-2026) and the 24 extra samples (stream/robustness sweep also 78/78 and 24/24). The Nanjing refined_volume case was a stale-snapshot artefact (see the table).
 | suite | main corpus (78 files, 2017-2026) | extra samples (24 files: projects 2011-2022, families 2016-2026) |
