@@ -21,6 +21,18 @@ for px in (0.05, 0.2, 1.0):
     same = z1.tobytes() == z2.tobytes(); nd0 += not same
     print('synthetic 30000 triangles (slivers, steep) px %.2f buffer %dx%d %s' % (px, db.W, db.H, 'IDENTICAL' if same else 'DIFFERENT %d cells' % int((z1 != z2).sum())), flush=True)
 bad += nd0 > 0
+def vis_check(P, db, zb, tag):
+    rng = np.random.default_rng(13); E = P[rng.integers(0, len(P), 20000)]; k = rng.integers(0, 3, 20000)
+    segs = np.ascontiguousarray(np.stack([E[np.arange(20000), k], E[np.arange(20000), (k + 1) % 3]], 1))
+    nd = 0
+    for n_samp in (4, 37, 400):
+        o1 = np.zeros((len(segs), n_samp), np.bool_); hlr._visible(segs, n_samp, db.u0, db.v0, db.px, zb, 0.05, o1)
+        o2 = np.zeros((len(segs), n_samp), np.bool_); ok = RF.hlr_visible(segs, n_samp, db.u0, db.v0, db.px, zb, 0.05, o2)
+        same = ok and o1.tobytes() == o2.tobytes(); nd += not same
+        print('  visible %s n_samp %d: %s (%d / %d visible)' % (tag, n_samp, 'IDENTICAL' if same else 'DIFFERENT', int(o1.sum()), o1.size), flush=True)
+    return nd
+db = hlr.DepthBuffer(lo[0], lo[1], hi[0], hi[1], 0.2); zb = db.zb.copy(); hlr._raster(np.ascontiguousarray(P), db.W, db.H, db.u0, db.v0, db.px, zb)
+bad += vis_check(P, db, zb, 'synthetic') > 0
 for f in sys.argv[1:]:
     d = RF.Doc(f); ids = [e for e, i in d.res.items() if i.get('bbox')]; random.Random(3).shuffle(ids)
     T = []
@@ -41,6 +53,7 @@ for f in sys.argv[1:]:
         z2 = db.zb.copy(); t = time.time(); ok = RF.hlr_raster(Q, db.W, db.H, db.u0, db.v0, db.px, z2); tb = time.time() - t
         same = ok and z1.tobytes() == z2.tobytes()
         nd += not same
+        nd += vis_check(Q, db, z1, 'view %d' % view)
         print('  view %d buffer %dx%d numba %.2fs rust %.2fs %s' % (view, db.W, db.H, ta, tb, 'IDENTICAL' if same else 'DIFFERENT (%d cells)' % int((z1 != z2).sum()) if ok else 'rust off'), flush=True)
     bad += nd > 0
     print('%-40s %s' % (os.path.basename(f)[:40], 'IDENTICAL' if not nd else 'DIFFERENT %d' % nd), flush=True)
