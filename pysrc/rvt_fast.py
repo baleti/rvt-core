@@ -894,3 +894,16 @@ def feature_edges(T, cosmax):
     if t.ndim != 3 or t.shape[1:] != (3, 3): return None
     if len(t) == 0: return np.zeros((0, 2, 3))
     return np.frombuffer(_rc().feature_edges(t.ctypes.data, len(t), float(cosmax)), dtype=np.float64).reshape(-1, 2, 3).copy()
+
+
+def smooth_part(pv, pf, smooth_cos):
+    """rvtviewer.build.smooth_part in Rust: -> (positions (np,3) float64, faces (m,3) int64, normals (np,3) float64), or None when the extension is stale / off
+    (the caller then runs its numpy code). Same welding order, accumulation order and thresholds as the numpy version (tests/diff_smooth.py)."""
+    import numpy as np
+    if not (on() and hasattr(_rc(), 'smooth_part')): return None
+    pv = np.ascontiguousarray(pv, dtype=np.float64); pf = np.ascontiguousarray(pf, dtype=np.int64).reshape(-1, 3)
+    if pv.ndim != 2 or pv.shape[1] != 3 or len(pf) == 0: return None
+    if int(pf.min()) < 0 or int(pf.max()) >= len(pv): return None
+    a, b, c = _rc().smooth_part(pv.ctypes.data, len(pv), pf.ctypes.data, len(pf), float(smooth_cos))
+    pos = np.frombuffer(a, dtype=np.float64).reshape(-1, 3).copy()
+    return pos, np.frombuffer(b, dtype=np.int64).reshape(-1, 3).copy(), np.frombuffer(c, dtype=np.float64).reshape(-1, 3).copy()
