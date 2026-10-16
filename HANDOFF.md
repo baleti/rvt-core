@@ -60,3 +60,9 @@ per-triangle mat, params ports, curved refinement ports, refined_volume in Rust 
 * diff_tess widened to 20 files (2017-2026), all identical.
 * Next: after c5-sheets adopts it, re-profile (bench/sheets_profile.py via h1_retry.sh): remaining hot spots are rvtsheets Python (patterns.hatch/shapely, scene.walk_record, gfx._index, wall_layers).
 * 2026-10-16: index_handles (rvtsheets gfx._index) released, parity identical. NOTE h1run pull of dev/ did not return the fresh build once (remote-host dev/ stayed old while target/release/librvt_core.so was new): if dev/ looks stale, rsync remote-host:src/rvt-core/target/release/librvt_core.so and copy it to dev/rvt_core.abi3.so yourself, then check hasattr on the new functions before ./release.sh --publish.
+
+# c5-rust 2026-10-16: speed outliers (viewer NEEDS-FROM-READER 20) fixed + released
+* 2017 rme_advanced cold extract 43 s -> 9.7 s: ~150 false/repeated ElementHeader candidates (garbage counts ~851968, 0.3-0.9 s each) are skipped when an earlier candidate already claimed the key (extract.rs Claim map; merge lazily decodes only free keys). Digests of extract(want_all) identical released vs new on all 102 files (tests/cmp_builds.sh). Remaining 9.7 s = candidates before the first accepted record (decode order is parallel, claims only come from earlier offsets).
+* Face->edge index in the Rust tessellator (mirrors rvt_mesh._face_edges): 2026 Site 150 meshes bit-identical, fast mesh 5.8 s vs 18.2 s reference. diff_tess/diff_mesh on Site + Facades identical.
+* Tools: bench/xdigest.py, tests/cmp_builds.sh, RVT_CORE_TIMING now splits decode/merge/threads, RVT_CORE_SLOW prints the largest count + path per slow candidate.
+* Released (python/ + ~/rvt-research/rvt_core.abi3.so), release --check OK, demo smoke OK. oracle snapshot accepted (rvt_mesh _face_edges ported, rvt_params reference loop).
