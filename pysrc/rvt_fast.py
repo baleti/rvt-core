@@ -32,8 +32,20 @@ def _rc():
 
 def _decoder_default_config():
     """the Rust decoder implements rvt_decode.Dec's default configuration only"""
+    import time
+    env = (os.environ.get('RVT_GG', '0'), os.environ.get('RVT_M'), os.environ.get('RVT_K5'))
+    now = time.monotonic()
+    if _DCFG[0] is not None and _DCFG[0][0] == env and now - _DCFG[2] < 1.0: return _DCFG[1]       # hints file re-checked at most once a second
     import rvt_decode as D
-    return not (D.load_hints() or os.environ.get('RVT_GG', '0') != '0' or os.environ.get('RVT_M') or os.environ.get('RVT_K5'))
+    try: st = os.stat(os.path.join(os.path.dirname(os.path.abspath(D.__file__)), 'rvt_hints.json')); sig = (st.st_mtime_ns, st.st_size)
+    except OSError: sig = None
+    key = (env, sig)
+    if _DCFG[0] == key:
+        _DCFG[2] = now; return _DCFG[1]                       # on() runs on every hook call (113k times in one sheets render): the hints file is parsed again only when it changed
+    r = not (D.load_hints() or env[0] != '0' or env[1] or env[2])
+    _DCFG[0], _DCFG[1], _DCFG[2] = key, r, now
+    return r
+_DCFG = [None, None, 0.0]
 
 def _pk_write(fn, obj):
     """write one .pk cache file atomically and drop older versions of the same kind for the same file (<key>-<kind><version>.pk)"""
