@@ -811,11 +811,24 @@ def tessellate_geometry(geo):
     """rvt_mesh.tessellate_geometry(geo) for a decoded Geometry node, Rust-backed (bit-identical triangles, fidx, frs, fprio, unsupported, faces; tests/diff_tess.py).
     Differences: 'tris' is a float64 ndarray (n, 3, 3) and 'meta' (surface evaluators) is not returned. Any failure (stale extension, unsupported value, a case where the
     reference raises) falls back to the reference function, so exceptions and results are the reference's."""
+    memo = _TMEMO if os.environ.get('RVT_FAST_REC_MEMO') else None
+    if memo is not None:                                     # opt-in with the record memo: the same decoded Geometry node (same object) is tessellated once; callers must not mutate the result
+        hit = memo.get(id(geo))
+        _TSTAT[0 if hit is not None else 1] += 1
+        if hit is not None and hit[0] is geo: return hit[1]
+    r = None
     if on() and hasattr(_rc(), 'tessellate_geometry'):
-        try: return _rc().tessellate_geometry(geo)
-        except Exception: pass
-    import rvt_mesh
-    return rvt_mesh.tessellate_geometry(geo)
+        try: r = _rc().tessellate_geometry(geo)
+        except Exception: r = None
+    if r is None:
+        import rvt_mesh
+        r = rvt_mesh.tessellate_geometry(geo)
+    if memo is not None: memo[id(geo)] = (geo, r)
+    return r
+
+_TMEMO = {}; _TSTAT = [0, 0]
+import atexit
+atexit.register(lambda: print('rvt_fast.tessellate_geometry memo hits %d misses %d' % tuple(_TSTAT), file=__import__('sys').stderr) if os.environ.get('RVT_FAST_TESS_STATS') else None)
 
 
 def index_handles(x):
