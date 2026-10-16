@@ -8,6 +8,19 @@ from rvtsheets import hlr
 n = 400
 if '--n' in sys.argv: i = sys.argv.index('--n'); n = int(sys.argv[i + 1]); del sys.argv[i:i + 2]
 bad = 0
+def synthetic():
+    rng = np.random.default_rng(11); n = 30000
+    base = rng.uniform(-50, 50, (n, 1, 3)); T = base + rng.normal(0, 1, (n, 3, 3)) * rng.choice([0.01, 0.3, 3, 20], (n, 1, 1))
+    sl = rng.random(n) < 0.3; T[sl, 1] = T[sl, 0] + rng.uniform(-60, 60, (sl.sum(), 3)); T[sl, 2] = T[sl, 1] + rng.normal(0, 0.02, (sl.sum(), 3))
+    return T
+P = synthetic(); lo = P.reshape(-1, 3).min(0); hi = P.reshape(-1, 3).max(0); nd0 = 0
+for px in (0.05, 0.2, 1.0):
+    db = hlr.DepthBuffer(lo[0], lo[1], hi[0], hi[1], px)
+    z1 = db.zb.copy(); hlr._raster(np.ascontiguousarray(P), db.W, db.H, db.u0, db.v0, db.px, z1)
+    z2 = db.zb.copy(); RF.hlr_raster(P, db.W, db.H, db.u0, db.v0, db.px, z2)
+    same = z1.tobytes() == z2.tobytes(); nd0 += not same
+    print('synthetic 30000 triangles (slivers, steep) px %.2f buffer %dx%d %s' % (px, db.W, db.H, 'IDENTICAL' if same else 'DIFFERENT %d cells' % int((z1 != z2).sum())), flush=True)
+bad += nd0 > 0
 for f in sys.argv[1:]:
     d = RF.Doc(f); ids = [e for e, i in d.res.items() if i.get('bbox')]; random.Random(3).shuffle(ids)
     T = []

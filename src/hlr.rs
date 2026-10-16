@@ -20,10 +20,25 @@ fn raster_band(tris: &[f64], w: i64, h: i64, u0: f64, v0: f64, px: f64, y_lo: i6
         let gx = ((z0 - z2) * (y1 - y2) - (z1 - z2) * (y0 - y2)) / den;
         let gy = ((z1 - z2) * (x0 - x2) - (z0 - z2) * (x1 - x2)) / den;
         let bias = (2.0 * (gx * gx + gy * gy).sqrt()).min(0.5);
+        // per row, the x interval where the three barycentric coordinates can be >= -1e-6 (each is linear in x): pixels outside it (plus a 2 pixel safety margin, far above the
+        // float error of the evaluation) cannot pass the exact test below, so skipping them leaves the buffer bit-identical
+        let (ka, kb) = ((y1 - y2) / den, (y2 - y0) / den);
+        let kc = -(ka + kb);
         for yy in ymin.max(y_lo)..=ymax.min(y_hi - 1) {
             let py = yy as f64 + 0.5;
             let row = &mut zb[((yy - y_lo) * w) as usize..((yy - y_lo + 1) * w) as usize];
-            for xx in xmin..=xmax {
+            let (mut xa, mut xb) = (xmin, xmax);
+            let ca = (x2 - x1) * (py - y2) / den - ka * x2;
+            let cb = (x0 - x2) * (py - y2) / den - kb * x2;
+            let cc = 1.0 - ca - cb;
+            let mut empty = false;
+            for (k, c0) in [(ka, ca), (kb, cb), (kc, cc)] {
+                if k.abs() < 1e-300 { if c0 < -1e-3 { empty = true; } continue; }
+                let bound = (-1e-6 - c0) / k - 0.5;
+                if k > 0.0 { xa = xa.max(bound.floor() as i64 - 2); } else { xb = xb.min(bound.ceil() as i64 + 2); }
+            }
+            if empty || xa > xb { continue; }
+            for xx in xa..=xb {
                 let pxx = xx as f64 + 0.5;
                 let a = ((y1 - y2) * (pxx - x2) + (x2 - x1) * (py - y2)) / den;
                 let b = ((y2 - y0) * (pxx - x2) + (x0 - x2) * (py - y2)) / den;
