@@ -286,7 +286,13 @@ def _doc_class():
             return s._cen
         def rec(s, eid):
             i = s.res.get(eid)
-            return s._g.record(i) if i else None
+            if not i: return None
+            m = s.__dict__.get('_rmemo')
+            if m is None and os.environ.get('RVT_FAST_REC_MEMO'): m = s._rmemo = {}      # opt-in: callers promise not to mutate the returned record (rvt-sheets walks symbol records many times)
+            if m is None: return s._g.record(i)
+            r = m.get(eid)
+            if r is None: r = m[eid] = s._g.record(i)
+            return r
     return Doc
 
 _DOC = None
@@ -805,11 +811,24 @@ def tessellate_geometry(geo):
     """rvt_mesh.tessellate_geometry(geo) for a decoded Geometry node, Rust-backed (bit-identical triangles, fidx, frs, fprio, unsupported, faces; tests/diff_tess.py).
     Differences: 'tris' is a float64 ndarray (n, 3, 3) and 'meta' (surface evaluators) is not returned. Any failure (stale extension, unsupported value, a case where the
     reference raises) falls back to the reference function, so exceptions and results are the reference's."""
+    memo = _TMEMO if os.environ.get('RVT_FAST_REC_MEMO') else None
+    if memo is not None:                                     # opt-in with the record memo: the same decoded Geometry node (same object) is tessellated once; callers must not mutate the result
+        hit = memo.get(id(geo))
+        _TSTAT[0 if hit is not None else 1] += 1
+        if hit is not None and hit[0] is geo: return hit[1]
+    r = None
     if on() and hasattr(_rc(), 'tessellate_geometry'):
-        try: return _rc().tessellate_geometry(geo)
-        except Exception: pass
-    import rvt_mesh
-    return rvt_mesh.tessellate_geometry(geo)
+        try: r = _rc().tessellate_geometry(geo)
+        except Exception: r = None
+    if r is None:
+        import rvt_mesh
+        r = rvt_mesh.tessellate_geometry(geo)
+    if memo is not None: memo[id(geo)] = (geo, r)
+    return r
+
+_TMEMO = {}; _TSTAT = [0, 0]
+import atexit
+atexit.register(lambda: print('rvt_fast.tessellate_geometry memo hits %d misses %d' % tuple(_TSTAT), file=__import__('sys').stderr) if os.environ.get('RVT_FAST_TESS_STATS') else None)
 
 
 def index_handles(x):
@@ -826,3 +845,15 @@ def index_handles(x):
             for v in y: walk(v)
     walk(x)
     return out
+
+
+def hlr_raster(tris, W, H, u0, v0, px, zb):
+    """rvtsheets.hlr._raster in Rust (row bands in parallel, bit-identical max-depth buffer): tris (n,3,3) float, zb (H, W) C-contiguous float64 modified in place.
+    Returns True when done; False (nothing touched) when the extension is stale / off or the buffer is not a plain float64 C array: the caller then runs its own code."""
+    import numpy as np
+    if not (on() and hasattr(_rc(), 'hlr_raster')): return False
+    if not (isinstance(zb, np.ndarray) and zb.dtype == np.float64 and zb.flags['C_CONTIGUOUS'] and zb.flags['WRITEABLE'] and zb.shape == (H, W)): return False
+    t = np.ascontiguousarray(tris, dtype=np.float64)
+    if t.ndim != 3 or t.shape[1:] != (3, 3): return False
+    _rc().hlr_raster(t.ctypes.data, len(t), int(W), int(H), float(u0), float(v0), float(px), zb.ctypes.data)
+    return True

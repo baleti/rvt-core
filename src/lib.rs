@@ -13,6 +13,7 @@ mod pool;
 mod params;
 mod cache;
 mod pack;
+mod hlr;
 use flate2::read::DeflateDecoder;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -148,6 +149,7 @@ fn rvt_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(elemmesh::refined_volume, m)?)?;
     m.add_function(wrap_pyfunction!(elemmesh::tessellate_geometry_py, m)?)?;
     m.add_function(wrap_pyfunction!(elemmesh::index_handles, m)?)?;
+    m.add_function(wrap_pyfunction!(hlr::hlr_raster, m)?)?;
     m.add_function(wrap_pyfunction!(elemmesh::body_summary_core, m)?)?;
     m.add_function(wrap_pyfunction!(elemmesh::refine_curved_dbg, m)?)?;
     m.add_function(wrap_pyfunction!(joined, m)?)?;
