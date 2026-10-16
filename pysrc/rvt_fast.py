@@ -871,3 +871,14 @@ def hlr_visible(segs, n_samp, u0, v0, px, zb, eps, out):
     if len(segs) == 0 or n_samp == 0: return True
     _rc().hlr_visible(segs.ctypes.data, len(segs), int(n_samp), float(u0), float(v0), float(px), zb.ctypes.data, zb.shape[1], zb.shape[0], float(eps), out.ctypes.data)
     return True
+
+
+def feature_edges(T, cosmax):
+    """rvtsheets.viewdraw._feature_edges(T, None) in Rust (same edges, same first-seen order, rounded coordinates): T (n,3,3) float, cosmax = cos(feature angle).
+    Returns a float64 array (k, 2, 3), or None when the extension is stale / off (the caller then runs its own code)."""
+    import numpy as np
+    if not (on() and hasattr(_rc(), 'feature_edges')): return None
+    t = np.ascontiguousarray(T, dtype=np.float64)
+    if t.ndim != 3 or t.shape[1:] != (3, 3): return None
+    if len(t) == 0: return np.zeros((0, 2, 3))
+    return np.frombuffer(_rc().feature_edges(t.ctypes.data, len(t), float(cosmax)), dtype=np.float64).reshape(-1, 2, 3).copy()
