@@ -354,13 +354,32 @@ def _with_mat(doc, r, compact):
         return r
     return dict(mat=[vals[i] if i >= 0 else -1 for i in idx], **r)
 
+def _topo_mat(doc, eid, r):
+    """reference rvt_elemmesh.element_mesh wrapper (2026-10-17): topography carries its material only as the instance parameter 'Material' (-1002107);
+    all-unassigned per-triangle materials of a SiteSurface / Toposolid become that material"""
+    try:
+        m = None if r is None else r.get('mat')
+        if m is None or not len(m) or doc.cls(eid) not in ('SiteSurface', 'Toposolid'): return r
+        if not all(int(x) == -1 for x in m): return r
+        import rvt_params as RP
+        cls_ = doc.cls(eid)
+        rec = extract_shared(doc.f)['recs'].get((int(eid), cls_))              # the full record (doc.rec is the graphics record only)
+        mid = RP.stored_params(rec['fields']).get(-1002107) if rec else None
+        if isinstance(mid, int) and mid > 0:
+            if hasattr(m, 'dtype'):
+                import numpy as np
+                r['mat'] = np.full(len(m), mid, dtype=m.dtype)
+            else: r['mat'] = [mid] * len(m)
+    except Exception: pass
+    return r
+
 class _MeshDoc:
     """the Rust MeshDoc with reference-shaped results (per-triangle 'mat' resolved in Python)"""
     def __init__(s, doc, md): s.doc = doc; s.md = md
     def element_mesh(s, eid, symbol_depth=2, detail=3):
-        return _with_mat(s.doc, s.md.element_mesh(int(eid), symbol_depth, detail), False)
+        return _topo_mat(s.doc, int(eid), _with_mat(s.doc, s.md.element_mesh(int(eid), symbol_depth, detail), False))
     def element_meshes(s, ids, symbol_depth=2, detail=3, compact=False):
-        return [_with_mat(s.doc, r, compact) for r in s.md.element_meshes(ids, symbol_depth, detail, compact)]
+        return [_topo_mat(s.doc, int(i), _with_mat(s.doc, r, compact)) for i, r in zip(ids, s.md.element_meshes(ids, symbol_depth, detail, compact))]
 
 def mesh_doc(doc):
     """the Rust element-mesh context of a fast Doc (built once)"""
