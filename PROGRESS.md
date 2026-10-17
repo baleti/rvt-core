@@ -51,3 +51,12 @@ Next: element_mesh in Rust, params, binary cache, README timings.
 - params mirror of 2026-10-15 (get_x_ro): identical on Residential / Structural, released, demo smoke OK.
 - Facades geometry stage: ensure_roofs 2.5 s is mostly first imports (OCP 2.0 s, scipy 0.5, matplotlib 0.3); prewarming them in a thread during 'reading': geometry -1.5 s, reading +0.4 s (noisy host).
 - rvt_viewer_fast.prestart(model) (dev only, not released): mesh stream started right after quick(), buffered for later em_geometries calls; results identical (Residential, Facades, Structural, rst_basic), but under load 12 it slows the reader stage (GIL contention): Facades 10.0/8.8 -> 8.0/9.8 s, Structural 11.8/16.6 -> 17.4/19.0 s. Not proposed.
+
+## 2026-10-17 (c3-rust, claude3 takeover)
+* Differential logs pulled (~/h1logs/rvt-core): all suites 0 DIFFERENT (main 78/78, extras 24/24). logs/h1_*.log in the repo are stale copies.
+* oracle_watch: no reference module differs from logs/snap.
+* smooth_part: remote-host build, diff_smooth IDENTICAL (Residential 34 meshes, Plumbing 69, synthetic), release --check OK, published, demo smoke OK x3. Hook + progress-file tip in ~/rvt-research/NEEDS-FROM-RUST.md.
+* rvt_materials decode measured at 16 ms (Structural 2024): no Rust port needed. material_for_face is a per-face debug helper, not hot.
+* Facades 2026 viewer conversion 12.4 s cold; remaining cost is viewer side (PIL swatches 6 s, scipy import 4.6 s): reported to c5-viewer.
+* rvtsheets already memoizes params() per reader: no change to rvt_fast.params.
+* Open: 40 MB cached full model 0.9 s (target 0.5 s) needs lazy record fields; not on the demo path, not started.
