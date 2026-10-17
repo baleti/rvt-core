@@ -14,7 +14,7 @@ mod params;
 mod cache;
 mod pack;
 mod hlr;
-use flate2::read::DeflateDecoder;
+use flate2::bufread::DeflateDecoder;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use rayon::prelude::*;
