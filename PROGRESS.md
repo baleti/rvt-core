@@ -60,3 +60,4 @@ Next: element_mesh in Rust, params, binary cache, README timings.
 * Facades 2026 viewer conversion 12.4 s cold; remaining cost is viewer side (PIL swatches 6 s, scipy import 4.6 s): reported to c5-viewer.
 * rvtsheets already memoizes params() per reader: no change to rvt_fast.params.
 * Open: 40 MB cached full model 0.9 s (target 0.5 s) needs lazy record fields; not on the demo path, not started.
+* sheets_profile 2024 Structural: Rust kernels 8.4 of 42 s; hints for c5-sheets (scene.cond_ok, index_handles memo) in NEEDS-FROM-RUST.md
