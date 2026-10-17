@@ -14,7 +14,7 @@ mod params;
 mod cache;
 mod pack;
 mod hlr;
-use flate2::read::DeflateDecoder;
+use flate2::bufread::DeflateDecoder;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use rayon::prelude::*;
@@ -152,6 +152,7 @@ fn rvt_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(hlr::hlr_raster, m)?)?;
     m.add_function(wrap_pyfunction!(hlr::hlr_visible, m)?)?;
     m.add_function(wrap_pyfunction!(hlr::feature_edges, m)?)?;
+    m.add_function(wrap_pyfunction!(hlr::smooth_part, m)?)?;
     m.add_function(wrap_pyfunction!(elemmesh::body_summary_core, m)?)?;
     m.add_function(wrap_pyfunction!(elemmesh::refine_curved_dbg, m)?)?;
     m.add_function(wrap_pyfunction!(joined, m)?)?;

@@ -4,11 +4,14 @@
 # scope (MemoryMax 6G, same slice) so one heavy file or a neighbour's memory cannot kill the whole suite; a killed file is logged as "FAILED rc".
 # uses a snapshot of the released build; oracle side single worker (memory-light)
 cd "$(dirname "$0")/.."
-SNAP=$(mktemp -d /tmp/rvtfast.XXXXXX); cp python/rvt_fast.py python/rvt_viewer_fast.py python/rvt_core.abi3.so "$SNAP"/
+SNAP=$(mktemp -d /tmp/rvtfast.XXXXXX); SRC=${SRC:-python}; cp $SRC/rvt_fast.py $SRC/rvt_viewer_fast.py $SRC/rvt_core.abi3.so "$SNAP"/
 export RVT_FAST_DIR="$SNAP" RVT_CORE_NOCACHE=1 RVT_WORKERS=1 RVT_THREADS=4
+[ -n "$LOGP" ] && P=$LOGP   # LOGP=prefix: fresh logs (e.g. re-run a build on the corpus)
 PY=${PY:-python}
 L=$HOME/h1logs/rvt-core; mkdir -p $L
-if [ -n "$EXTRA" ]; then   # EXTRA=1: the older project samples (2011-2022) and the family files (2016-2026); logs get an x_ prefix
+if [ -n "$FILELIST" ]; then   # FILELIST=file with one path per line (e.g. writer outputs): logs get a w_ prefix
+  ALL=$(cat $FILELIST); SUB=$ALL; P=w_
+elif [ -n "$EXTRA" ]; then   # EXTRA=1: the older project samples (2011-2022) and the family files (2016-2026); logs get an x_ prefix
   ALL=$(ls -Sr $HOME/rvt-research/samples/* $HOME/rvt-research/samples-rfa/*); SUB=$ALL; P=x_
 else
   ALL=$(ls -Sr $HOME/rvt-research/corpus/*/*)

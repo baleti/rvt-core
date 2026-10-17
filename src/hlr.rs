@@ -169,3 +169,62 @@ pub fn feature_edges<'py>(py: Python<'py>, tris_ptr: usize, n: usize, cosmax: f6
     });
     Ok(pyo3::types::PyBytes::new_bound(py, &bytes))
 }
+
+/// rvtviewer.build.smooth_part(pv, pf): weld vertices on a 0.05 mm grid (np.unique over the rounded rows: sorted order, first occurrence), area-weighted vertex normals,
+/// corners within the smoothing cone share the vertex normal, the others get their own vertex with the flat face normal. Same operation order as the numpy code.
+/// pv (nv,3) float64, pf (mf,3) int64 (C-contiguous, raw addresses) -> (pos bytes, idx bytes, nrm bytes): float64 (np,3), int64 (mf,3), float64 (np,3).
+#[pyfunction]
+pub fn smooth_part<'py>(py: Python<'py>, pv_ptr: usize, nv: usize, pf_ptr: usize, mf: usize, smooth_cos: f64) -> PyResult<(Bound<'py, pyo3::types::PyBytes>, Bound<'py, pyo3::types::PyBytes>, Bound<'py, pyo3::types::PyBytes>)> {
+    use pyo3::types::PyBytes;
+    // SAFETY: the Python wrapper keeps both arrays alive and sized nv*3 float64 / mf*3 int64
+    let pv: &[f64] = unsafe { std::slice::from_raw_parts(pv_ptr as *const f64, nv * 3) };
+    let pf: &[i64] = unsafe { std::slice::from_raw_parts(pf_ptr as *const i64, mf * 3) };
+    let (pos, idx, nrm) = py.allow_threads(|| {
+        let key = |i: usize| -> [i64; 3] { [(pv[i * 3] * 2e4).round_ties_even() as i64, (pv[i * 3 + 1] * 2e4).round_ties_even() as i64, (pv[i * 3 + 2] * 2e4).round_ties_even() as i64] };
+        let keys: Vec<[i64; 3]> = (0..nv).map(key).collect();
+        let mut order: Vec<usize> = (0..nv).collect();
+        order.sort_by(|&a, &b| keys[a].cmp(&keys[b]));          // stable: the first of equal keys stays first
+        let mut inv = vec![0usize; nv];
+        let mut first: Vec<usize> = vec![];
+        for (r, &i) in order.iter().enumerate() {
+            if r == 0 || keys[order[r - 1]] != keys[i] { first.push(i); }
+            inv[i] = first.len() - 1;
+        }
+        let nw = first.len();
+        let wf: Vec<[usize; 3]> = (0..mf).map(|f| [inv[pf[f * 3] as usize], inv[pf[f * 3 + 1] as usize], inv[pf[f * 3 + 2] as usize]]).collect();
+        let p = |i: i64| -> [f64; 3] { let i = i as usize; [pv[i * 3], pv[i * 3 + 1], pv[i * 3 + 2]] };
+        let norm = |v: [f64; 3]| ((v[0] * v[0] + v[1] * v[1]) + v[2] * v[2]).sqrt();
+        let mut fnv: Vec<[f64; 3]> = Vec::with_capacity(mf);
+        let mut fu: Vec<[f64; 3]> = Vec::with_capacity(mf);
+        let mut okv: Vec<bool> = Vec::with_capacity(mf);
+        for f in 0..mf {
+            let (p0, p1, p2) = (p(pf[f * 3]), p(pf[f * 3 + 1]), p(pf[f * 3 + 2]));
+            let (a, b) = ([p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]], [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]]);
+            let c = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+            let ln = norm(c); let ok = ln > 1e-12;
+            fnv.push(c); okv.push(ok); fu.push(if ok { [c[0] / ln, c[1] / ln, c[2] / ln] } else { [0.0; 3] });
+        }
+        let mut nn = vec![[0.0f64; 3]; nw];
+        for k in 0..3 { for f in 0..mf { let t = &mut nn[wf[f][k]]; for j in 0..3 { t[j] += fnv[f][j]; } } }
+        for t in nn.iter_mut() { let nl = norm(*t); if nl > 1e-12 { *t = [t[0] / nl, t[1] / nl, t[2] / nl]; } else { *t = [0.0; 3]; } }
+        let mut pos: Vec<f64> = Vec::with_capacity((nw + mf) * 3);
+        let mut nrm: Vec<f64> = Vec::with_capacity((nw + mf) * 3);
+        for &i in &first { pos.extend_from_slice(&pv[i * 3..i * 3 + 3]); }
+        for t in &nn { nrm.extend_from_slice(t); }
+        let mut idx: Vec<i64> = Vec::with_capacity(mf * 3);
+        for f in 0..mf {
+            for k in 0..3 {
+                let nv_ = nn[wf[f][k]]; let u = fu[f];
+                let sm = ((u[0] * nv_[0] + u[1] * nv_[1]) + u[2] * nv_[2]) > smooth_cos;
+                if !sm && okv[f] {
+                    idx.push((pos.len() / 3) as i64);
+                    let i = pf[f * 3 + k] as usize; pos.extend_from_slice(&pv[i * 3..i * 3 + 3]); nrm.extend_from_slice(&u);
+                } else { idx.push(wf[f][k] as i64); }
+            }
+        }
+        (pos, idx, nrm)
+    });
+    let f8 = |v: &Vec<f64>| { let mut b = Vec::with_capacity(v.len() * 8); for x in v { b.extend_from_slice(&x.to_le_bytes()); } b };
+    let i8 = |v: &Vec<i64>| { let mut b = Vec::with_capacity(v.len() * 8); for x in v { b.extend_from_slice(&x.to_le_bytes()); } b };
+    Ok((PyBytes::new_bound(py, &f8(&pos)), PyBytes::new_bound(py, &i8(&idx)), PyBytes::new_bound(py, &f8(&nrm))))
+}

@@ -32,8 +32,20 @@ def _rc():
 
 def _decoder_default_config():
     """the Rust decoder implements rvt_decode.Dec's default configuration only"""
+    import time
+    env = (os.environ.get('RVT_GG', '0'), os.environ.get('RVT_M'), os.environ.get('RVT_K5'))
+    now = time.monotonic()
+    if _DCFG[0] is not None and _DCFG[0][0] == env and now - _DCFG[2] < 1.0: return _DCFG[1]       # hints file re-checked at most once a second
     import rvt_decode as D
-    return not (D.load_hints() or os.environ.get('RVT_GG', '0') != '0' or os.environ.get('RVT_M') or os.environ.get('RVT_K5'))
+    try: st = os.stat(os.path.join(os.path.dirname(os.path.abspath(D.__file__)), 'rvt_hints.json')); sig = (st.st_mtime_ns, st.st_size)
+    except OSError: sig = None
+    key = (env, sig)
+    if _DCFG[0] == key:
+        _DCFG[2] = now; return _DCFG[1]                       # on() runs on every hook call (113k times in one sheets render): the hints file is parsed again only when it changed
+    r = not (D.load_hints() or env[0] != '0' or env[1] or env[2])
+    _DCFG[0], _DCFG[1], _DCFG[2] = key, r, now
+    return r
+_DCFG = [None, None, 0.0]
 
 def _pk_write(fn, obj):
     """write one .pk cache file atomically and drop older versions of the same kind for the same file (<key>-<kind><version>.pk)"""
@@ -882,3 +894,16 @@ def feature_edges(T, cosmax):
     if t.ndim != 3 or t.shape[1:] != (3, 3): return None
     if len(t) == 0: return np.zeros((0, 2, 3))
     return np.frombuffer(_rc().feature_edges(t.ctypes.data, len(t), float(cosmax)), dtype=np.float64).reshape(-1, 2, 3).copy()
+
+
+def smooth_part(pv, pf, smooth_cos):
+    """rvtviewer.build.smooth_part in Rust: -> (positions (np,3) float64, faces (m,3) int64, normals (np,3) float64), or None when the extension is stale / off
+    (the caller then runs its numpy code). Same welding order, accumulation order and thresholds as the numpy version (tests/diff_smooth.py)."""
+    import numpy as np
+    if not (on() and hasattr(_rc(), 'smooth_part')): return None
+    pv = np.ascontiguousarray(pv, dtype=np.float64); pf = np.ascontiguousarray(pf, dtype=np.int64).reshape(-1, 3)
+    if pv.ndim != 2 or pv.shape[1] != 3 or len(pf) == 0: return None
+    if int(pf.min()) < 0 or int(pf.max()) >= len(pv): return None
+    a, b, c = _rc().smooth_part(pv.ctypes.data, len(pv), pf.ctypes.data, len(pf), float(smooth_cos))
+    pos = np.frombuffer(a, dtype=np.float64).reshape(-1, 3).copy()
+    return pos, np.frombuffer(b, dtype=np.int64).reshape(-1, 3).copy(), np.frombuffer(c, dtype=np.float64).reshape(-1, 3).copy()
