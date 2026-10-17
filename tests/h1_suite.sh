@@ -6,7 +6,6 @@
 cd "$(dirname "$0")/.."
 SNAP=$(mktemp -d /tmp/rvtfast.XXXXXX); SRC=${SRC:-python}; cp $SRC/rvt_fast.py $SRC/rvt_viewer_fast.py $SRC/rvt_core.abi3.so "$SNAP"/
 export RVT_FAST_DIR="$SNAP" RVT_CORE_NOCACHE=1 RVT_WORKERS=1 RVT_THREADS=4
-[ -n "$LOGP" ] && P=$LOGP   # LOGP=prefix: fresh logs (e.g. re-run a build on the corpus)
 PY=${PY:-python}
 L=$HOME/h1logs/rvt-core; mkdir -p $L
 if [ -n "$FILELIST" ]; then   # FILELIST=file with one path per line (e.g. writer outputs): logs get a w_ prefix
@@ -17,6 +16,7 @@ else
   ALL=$(ls -Sr $HOME/rvt-research/corpus/*/*)
   SUB=$(ls -Sr $HOME/rvt-research/corpus/*/* | awk 'NR % 3 == 1')
 fi
+[ -n "$LOGP" ] && P=$LOGP   # LOGP=prefix: fresh logs (e.g. re-run a build on the same files)
 run1() {  # suite log file args...
   local log=$1 f=$2; shift 2
   grep -q "^$(basename "$f" | cut -c1-40)" "$log" 2>/dev/null && return 0
