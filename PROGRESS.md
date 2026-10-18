@@ -82,3 +82,4 @@ Next: element_mesh in Rust, params, binary cache, README timings.
 * 2026-10-18 (c6-rust) viewer already consumes the progress file (rvtviewer/build.py reader_progress via rvt_fast.file_key): brief item 'viewer consuming the progress API' met.
 * 2026-10-18 (c6-rust) rvt_params beam y/z Offset Value: rst_basic IDENTICAL, snapshot accepted (pure Python).
 * 2026-10-18 (c6-rust) rvt_params 'Elevation from Level' 0 for level-less FamilyInstance: rst_basic IDENTICAL, snapshot accepted (pure Python).
+* 2026-10-18 (c6-rust) tests/params_watch.sh: automates verify+accept of Python-only rvt_params edits (rst_basic IDENTICAL -> accept); accepted 'Elevation' / offset / sheet edits this way.
