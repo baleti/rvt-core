@@ -90,3 +90,10 @@ Zero differences in every comparison over the whole main corpus (78 files, 2017-
 * Cross-machine note: the Python reference is not bit-reproducible across CPUs (numpy 2.5.4 SIMD paths): on 2018 rst_basic the reference on remote-host (i7-7700K) differs from
   the reference on remote-host (i5-1245U) in 9 of 300 meshes (same triangles count / area / vertex set), while the Rust output is identical on both hosts and equal to
   remote-host's reference. remote-host suite lines "geometrically equivalent" are this effect; bit-identity is checked on remote-host.
+
+### Timing refresh 2026-10-18 (remote-host, cold: RVT_CORE_NOCACHE=1, `bench/modelstages.py`, released build after the inflate / col_grid / topography changes)
+| file | quick (table) | full model (extraction + params) |
+|---|---|---|
+| 2020 Residential (6 MB) | 0.4 s | 1.1 s |
+| 2024 Snowdon Structural | 1.4 s | 3.6 s |
+| 2026 Snowdon Facades (53 MB) | 1.1 s | 1.5 s |

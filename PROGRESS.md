@@ -70,3 +70,4 @@ Next: element_mesh in Rust, params, binary cache, README timings.
 * 2026-10-17 RELEASED rvt_elemmesh topography material wrapper (SiteSurface/Toposolid all -1 mats -> stored 'Material' param -1002107; rvt_fast._topo_mat, full record via extract_shared; doc.rec is the graphics record only): Residential 471 elements 0 DIFFERENT (6 before), Site 2024 1200 identical. rvt_materials.fill_patterns is pure Python (no port).
 * 2026-10-17 m2_ mesh_all with the released build (col_grid + topo material): 78 ok, 0 failed, 0 DIFFERENT. oracle_watch clean.
 * rvt_params door-size tweak (c5-geometry): p4_ params 3 files identical, snapshot accepted.
+* 2026-10-18 timing refresh (README): cold full model Residential 1.1 s, Structural 3.6 s, Facades 1.5 s on remote-host; all targets still met.
