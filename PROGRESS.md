@@ -80,3 +80,4 @@ Next: element_mesh in Rust, params, binary cache, README timings.
 * 2026-10-18 (c6-rust) params check completed on remote-host: rst_basic, rme_basic 2020, Snowdon Plumbing 2024 all IDENTICAL; snapshot accepted. p6chk removed from H1 queue.
 * 2026-10-18 (c6-rust) tests/fuzz_g103.py (mutated stored partition -> g103_load/g103_record): 360 cases rst_basic, 0 panics.
 * 2026-10-18 (c6-rust) viewer already consumes the progress file (rvtviewer/build.py reader_progress via rvt_fast.file_key): brief item 'viewer consuming the progress API' met.
+* 2026-10-18 (c6-rust) rvt_params beam y/z Offset Value: rst_basic IDENTICAL, snapshot accepted (pure Python).
