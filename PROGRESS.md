@@ -73,3 +73,4 @@ Next: element_mesh in Rust, params, binary cache, README timings.
 * 2026-10-18 timing refresh (README): cold full model Residential 1.1 s, Structural 3.6 s, Facades 1.5 s on remote-host; all targets still met.
 * rvt_materials.render_colors (pure Python over material_table): no port, snapshot accepted.
 * 2026-10-18 RELEASED: NaN-safe float sorts (fcmp) in the Rust tessellator. tests/fuzz_tess.py (mutated Geometry nodes) found 7 Option::unwrap panics (mesh.rs sorts) before: 0 panics in 14k mutated calls after; diff_tess identical (Residential 1165 nodes, twist 873), release --check, demo smoke.
+* 2026-10-18 tests/fuzz_kernels.py (hlr_raster, hlr_visible, feature_edges, smooth_part with NaN/inf/huge/out-of-range input): 3 seeds x 400 cases, 0 panics. Not yet fuzzed: mesh_doc / g103 / refined_volume entry points.
