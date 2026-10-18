@@ -84,3 +84,4 @@ Next: element_mesh in Rust, params, binary cache, README timings.
 * 2026-10-18 (c6-rust) rvt_params 'Elevation from Level' 0 for level-less FamilyInstance: rst_basic IDENTICAL, snapshot accepted (pure Python).
 * 2026-10-18 (c6-rust) tests/params_watch.sh: automates verify+accept of Python-only rvt_params edits (rst_basic IDENTICAL -> accept); accepted 'Elevation' / offset / sheet edits this way.
 * 2026-10-18 (c6-rust) further rvt_params edits accepted via tests/params_watch.sh (rst_basic IDENTICAL each time).
+* 2026-10-18 (c6-rust) rvt_geom curve Slope sign (c5-geometry): rst_basic params IDENTICAL, snapshot accepted (Python-only, params cache hash picks it up).
