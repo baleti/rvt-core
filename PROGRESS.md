@@ -78,3 +78,4 @@ Next: element_mesh in Rust, params, binary cache, README timings.
 * 2026-10-18 (c6-rust) rvt_params (rebar number, Host|String None, Toposolid): diff_params rst_basic + rme_basic 2020 IDENTICAL on remote-host; snapshot accepted. rvt_geometry wall bbox: no Rust path. No release needed.
 * 2026-10-18 19:40 (c6-rust) rvt_params Sheet Number/Name '---' for unplaced views: rst_basic IDENTICAL, snapshot accepted (pure Python).
 * 2026-10-18 (c6-rust) params check completed on remote-host: rst_basic, rme_basic 2020, Snowdon Plumbing 2024 all IDENTICAL; snapshot accepted. p6chk removed from H1 queue.
+* 2026-10-18 (c6-rust) tests/fuzz_g103.py (mutated stored partition -> g103_load/g103_record): 360 cases rst_basic, 0 panics.
