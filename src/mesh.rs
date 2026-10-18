@@ -1252,8 +1252,8 @@ pub fn tessellate(kk: &K, faces: &[&Val], edges: &EdgeMap, earcut: Earcut) -> Rs
                         for bi in [0usize, 1] { if nset(&bd[bi]) > 2 { for q in &bd[bi] { ue.push(round9(q[0])); } } }
                         let mut ve: Vec<f64> = vec![];
                         for bi in [2usize, 3] { if nset(&bd[bi]) > 2 { for q in &bd[bi] { ve.push(round9(q[1])); } } }
-                        ue.sort_by(|a, b| a.partial_cmp(b).unwrap()); ue.dedup();
-                        ve.sort_by(|a, b| a.partial_cmp(b).unwrap()); ve.dedup();
+                        ue.sort_by(|a, b| fcmp(a, b)); ue.dedup();
+                        ve.sort_by(|a, b| fcmp(a, b)); ve.dedup();
                         if ue.len() > 2 { us = ue; }
                         if ve.len() > 2 { vs = ve; }
                         let (nu, nv) = (us.len() - 1, vs.len() - 1);
@@ -1291,9 +1291,9 @@ pub fn tessellate(kk: &K, faces: &[&Val], edges: &EdgeMap, earcut: Earcut) -> Rs
                     }
                     let srt = |lst: &Vec<UV>, ax: usize, rev: bool| -> Vec<UV> {
                         let mut s: Vec<UV> = lst.iter().map(|p| [round9(p[0]), round9(p[1])]).collect();
-                        s.sort_by(|a, b| a[0].partial_cmp(&b[0]).unwrap().then(a[1].partial_cmp(&b[1]).unwrap()));
+                        s.sort_by(|a, b| fcmp(&a[0], &b[0]).then(fcmp(&a[1], &b[1])));
                         s.dedup_by(|a, b| a[0] == b[0] && a[1] == b[1]);
-                        s.sort_by(|a, b| { let o = a[ax].partial_cmp(&b[ax]).unwrap(); if rev { o.reverse() } else { o } });
+                        s.sort_by(|a, b| { let o = fcmp(&a[ax], &b[ax]); if rev { o.reverse() } else { o } });
                         let mut o: Vec<UV> = vec![];
                         for q in s { if o.last().map_or(true, |l: &UV| (q[0] - l[0]).abs() + (q[1] - l[1]).abs() > 1e-9) { o.push(q); } }
                         o
@@ -1659,6 +1659,10 @@ pub fn nearly_closed(tris: &[Tri], frac: f64, min_tris: usize) -> bool {
     (mesh_open_edges(tris, 5e-5) as f64) <= frac * 1.5 * tris.len() as f64
 }
 
+/// total order on f64 for sorts: identical to partial_cmp on non-NaN values, NaN after everything (a NaN in decoded geometry must not panic the sort)
+#[inline]
+fn fcmp(a: &f64, b: &f64) -> std::cmp::Ordering { a.partial_cmp(b).unwrap_or_else(|| a.is_nan().cmp(&b.is_nan())) }
+
 /// Python round(x, 8) (correctly rounded decimal, parsed back)
 fn round8(x: f64) -> f64 { format!("{:.8}", x).parse::<f64>().unwrap_or(x) }
 
@@ -1673,7 +1677,7 @@ pub fn rect_grid(verts: &[UV], ev: &Surf, max_n: usize) -> Option<(Vec<UV>, Vec<
     let ar = area2(verts);
     let rect = (u1 - u0) * (v1 - v0);
     if (ar.abs() - rect).abs() > 1e-6 * rect + 1e-12 { return None; }
-    let set = |it: Vec<f64>| -> Vec<f64> { let mut v = it; v.sort_by(|a, b| a.partial_cmp(b).unwrap()); v.dedup_by(|a, b| a.to_bits() == b.to_bits() || *a == *b); v };
+    let set = |it: Vec<f64>| -> Vec<f64> { let mut v = it; v.sort_by(|a, b| fcmp(a, b)); v.dedup_by(|a, b| a.to_bits() == b.to_bits() || *a == *b); v };
     let ub0 = set(verts.iter().filter(|q| (q[1] - v0).abs() < tb).map(|q| round8(q[0])).chain([round8(u0), round8(u1)]).collect());
     let ub1 = set(verts.iter().filter(|q| (q[1] - v1).abs() < tb).map(|q| round8(q[0])).chain([round8(u0), round8(u1)]).collect());
     let vb0 = set(verts.iter().filter(|q| (q[0] - u0).abs() < tb).map(|q| round8(q[1])).chain([round8(v0), round8(v1)]).collect());
@@ -1719,7 +1723,7 @@ pub fn col_grid(verts: &[UV], ev: &Surf, max_rows: usize) -> Option<(Vec<UV>, Ve
     let ar = area2(verts);
     let rect = (u1 - u0) * (v1 - v0);
     if (ar.abs() - rect).abs() > 1e-6 * rect + 1e-12 { return None; }
-    let set = |it: Vec<f64>| -> Vec<f64> { let mut v = it; v.sort_by(|a, b| a.partial_cmp(b).unwrap()); v.dedup_by(|a, b| *a == *b); v };
+    let set = |it: Vec<f64>| -> Vec<f64> { let mut v = it; v.sort_by(|a, b| fcmp(a, b)); v.dedup_by(|a, b| *a == *b); v };
     let a0 = set(verts.iter().filter(|q| (q[1] - v0).abs() < tb).map(|q| round8(q[0])).chain([round8(u0), round8(u1)]).collect());
     let a1 = set(verts.iter().filter(|q| (q[1] - v1).abs() < tb).map(|q| round8(q[0])).chain([round8(u0), round8(u1)]).collect());
     if a0 != a1 { return None; }
