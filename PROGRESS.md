@@ -72,3 +72,4 @@ Next: element_mesh in Rust, params, binary cache, README timings.
 * rvt_params door-size tweak (c5-geometry): p4_ params 3 files identical, snapshot accepted.
 * 2026-10-18 timing refresh (README): cold full model Residential 1.1 s, Structural 3.6 s, Facades 1.5 s on remote-host; all targets still met.
 * rvt_materials.render_colors (pure Python over material_table): no port, snapshot accepted.
+* 2026-10-18 RELEASED: NaN-safe float sorts (fcmp) in the Rust tessellator. tests/fuzz_tess.py (mutated Geometry nodes) found 7 Option::unwrap panics (mesh.rs sorts) before: 0 panics in 14k mutated calls after; diff_tess identical (Residential 1165 nodes, twist 873), release --check, demo smoke.
