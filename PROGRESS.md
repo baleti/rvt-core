@@ -76,3 +76,4 @@ Next: element_mesh in Rust, params, binary cache, README timings.
 * 2026-10-18 tests/fuzz_kernels.py (hlr_raster, hlr_visible, feature_edges, smooth_part with NaN/inf/huge/out-of-range input): 3 seeds x 400 cases, 0 panics. Not yet fuzzed: mesh_doc / g103 / refined_volume entry points.
 * 2026-10-18 tests/fuzz_refvol.py: refined_volume on mutated element meshes (1025 calls), 0 panics. Left unfuzzed: g103 record entry points.
 * 2026-10-18 (c6-rust) rvt_params (rebar number, Host|String None, Toposolid): diff_params rst_basic + rme_basic 2020 IDENTICAL on remote-host; snapshot accepted. rvt_geometry wall bbox: no Rust path. No release needed.
+* 2026-10-18 19:40 (c6-rust) rvt_params Sheet Number/Name '---' for unplaced views: rst_basic IDENTICAL, snapshot accepted (pure Python).
