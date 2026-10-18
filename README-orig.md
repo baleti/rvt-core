@@ -72,7 +72,8 @@ Per component, same machine (measured during development, single runs):
 | face -> edge index in the Rust tessellator (reference `_face_edges`) | 2026 Site: 150 meshes bit-identical, mesh stage 5.8 s vs 18.2 s reference |
 | 2017 rme_advanced cold extract | 43 s -> 9.7 s: false/repeated ElementHeader candidates are skipped once an earlier candidate has claimed the key; extract digests identical released vs new on all 102 files (`tests/cmp_builds.sh`) |
 
-## Differential status (reference = pure Python, released builds, host1 logs 2026-10-15)
+## Differential status (reference = pure Python, released builds; host1 logs 2026-10-15, re-verified 2026-10-17/18 after the inflate, col_grid, topography-material and NaN-sort releases)
+Latest re-runs: extract_all 78/78 (r_), mesh_all 78/78 0 DIFFERENT (m2_, released build), 161 write-lab outputs identical in g103 / params / extract / mesh (wa_), params 2020 rst_basic + rme_basic and 2024 Plumbing identical against the 2026-10-18 reference. Fuzzers (chunk, container, tess, kernels, refvol): 0 panics.
 Zero differences in every comparison over the whole main corpus (78 files, 2017-2026) and the 24 extra samples (stream/robustness sweep also 78/78 and 24/24). The Nanjing refined_volume case was a stale-snapshot artefact (see the table).
 | suite | main corpus (78 files, 2017-2026) | extra samples (24 files: projects 2011-2022, families 2016-2026) |
 |---|---|---|
