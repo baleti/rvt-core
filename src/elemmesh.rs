@@ -651,7 +651,7 @@ pub fn refined_volume(py: Python<'_>, tris: Vec<[[f64; 3]; 3]>, meta: &Bound<'_,
 pub fn refine_curved_dbg(verts: Vec<(f64, f64)>, idx: Vec<u32>, ev: &Bound<'_, SurfEval>, rel_tol: f64, abs_tol: f64, max_tris: usize) -> PyResult<(Vec<(f64, f64)>, Vec<[usize; 3]>)> {
     let s = ev.borrow().s.clone().ok_or_else(|| pyo3::exceptions::PyValueError::new_err("no surface"))?;
     let v: Vec<UV> = verts.iter().map(|p| [p.0, p.1]).collect();
-    let (nv, t) = refine_curved(&v, &idx, &s, rel_tol, abs_tol, max_tris);
+    let (nv, t) = refine_curved(&v, &idx, &s, rel_tol, abs_tol, max_tris, None);
     Ok((nv.iter().map(|p| (p[0], p[1])).collect(), t))
 }
 
