@@ -86,3 +86,4 @@ Next: element_mesh in Rust, params, binary cache, README timings.
 * 2026-10-18 (c6-rust) further rvt_params edits accepted via tests/params_watch.sh (rst_basic IDENTICAL each time).
 * 2026-10-18 (c6-rust) rvt_geom curve Slope sign (c5-geometry): rst_basic params IDENTICAL, snapshot accepted (Python-only, params cache hash picks it up).
 * 2026-10-18 (c6-rust) rvt_params + rvt_geom edits accepted again (rst_basic IDENTICAL).
+* 2026-10-19 (c6-rust) several more Python-only rvt_params/rvt_geom edits (c5-geometry) accepted via tests/params_watch.sh, rst_basic IDENTICAL each time. fullrep still queued (remote-host below 11 GB).
