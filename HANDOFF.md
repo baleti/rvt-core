@@ -73,3 +73,6 @@ per-triangle mat, params ports, curved refinement ports, refined_volume in Rust 
 # c5-rust 2026-10-16 evening: sheets-path speed (all released, demo smoke OK)
 * rvt_fast.tessellate_geometry (13-41x), index_handles, Doc.rec record memo + tessellation memo (RVT_FAST_REC_MEMO=1, set by rvtsheets.reader), hlr_raster (parallel + per-row intervals, bit-identical to numba incl. synthetic slivers). Structural 6 views + 2 sheets on remote-host: 98.6 s -> ~65 s before the row-interval raster. Parity tests: tests/diff_tess.py, diff_index.py, diff_raster.py (numba, remote-host). Notes for c5-sheets: ~/rvt-research/NEEDS-FROM-RUST.md.
 * Remaining sheets cost is rvtsheets Python: walk_record/node 17 s, view_filters/params 7 s, _feature_edges 6.9 s, visible_parts 5 s.
+
+# c7-rust (claude7) 2026-10-19
+Takeover verified: suites all 0 DIFFERENT, oracle_watch clean after params_watch.sh (rst_basic IDENTICAL). Each round: sh tests/params_watch.sh (exit 2 = non-params module changed, port it). Blocked on remote-host memory gate: fullrep f7_ (README table refresh), Nanjing nothing open. Cached 40 MB open 0.9 s stays (needs lazy records, reference audit by c5-geometry).

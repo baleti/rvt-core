@@ -87,3 +87,4 @@ Next: element_mesh in Rust, params, binary cache, README timings.
 * 2026-10-18 (c6-rust) rvt_geom curve Slope sign (c5-geometry): rst_basic params IDENTICAL, snapshot accepted (Python-only, params cache hash picks it up).
 * 2026-10-18 (c6-rust) rvt_params + rvt_geom edits accepted again (rst_basic IDENTICAL).
 * 2026-10-19 (c6-rust) several more Python-only rvt_params/rvt_geom edits (c5-geometry) accepted via tests/params_watch.sh, rst_basic IDENTICAL each time. fullrep still queued (remote-host below 11 GB).
+* 2026-10-19 (c7-rust takeover, claude7) remote-host h1_summary.log read: no DIFFERENT line in any current suite (wa_/m2_/p3-p5_ all 0; the earlier w_/w2_ 1 DIFFERENT was the e3_noframe inflate bug, fixed, w3_ 0). params_watch: rst_basic IDENTICAL, snapshot accepted (rvt_params Python-only). No release needed. fullrep (f7_) still gated: remote-host MemAvailable 3.9 GB < 11 GB. Open: 40 MB cached full model 0.9 s (lazy records, risky, not demo path).
