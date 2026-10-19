@@ -1,6 +1,6 @@
 # rvt-core
 
-Rust hot core (PyO3, abi3) for the Revit file reader in `~/rvt-research` (session 176). Own code only: no ODA material, nothing copied from rvt-rs or other projects.
+Rust hot core (PyO3, abi3) for the Revit file reader in `~/rvt-research` (session 176). Own code only: no code copied from other projects.
 The Python reader stays the reference oracle: every fast path has the same signature and result as the oracle function and is checked by a differential test against the
 pure-Python oracle (`RVT_NOFAST=1`) over the corpus (2017-2026, kept local).
 
