@@ -29,3 +29,10 @@ for e in map(int, sys.argv[2:]):
             if fa.get(f) != fb.get(f):
                 m = a['meta'][[k for k, x in enumerate(a['fidx']) if x == f][0]] if f in fa else None
                 print('   face', f, 'ref', len(fa.get(f, [])), 'rust', len(fb.get(f, [])), 'sorted-equal', sorted(fa.get(f, [])) == sorted(fb.get(f, [])), 'kind', (m or ('?',))[0] if m else None)
+
+        if os.environ.get('PROBE_DUMP'):
+            f = int(os.environ['PROBE_DUMP']); A = [ta[k] for k, x in enumerate(a['fidx']) if x == f]; B = [tb[k] for k, x in enumerate(b['fidx']) if x == f]
+            sa = {x.tobytes() for x in A}
+            for k, (x, y) in enumerate(zip(A, B)):
+                if x.tobytes() != y.tobytes(): print('   tri', k, 'ref', np.round(x, 6).tolist(), 'rust', np.round(y, 6).tolist()); break
+            print('   in-ref-not-rust', len([y for y in B if y.tobytes() not in sa]), 'of', len(B))
