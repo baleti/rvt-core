@@ -1335,28 +1335,15 @@ pub fn tessellate(kk: &K, faces: &[&Val], edges: &EdgeMap, earcut: Earcut) -> Rs
                 ri += 1;
                 let mut idx = match r { Some(i) => i, None => { out.unsup.push("earcut"); continue; } };
                 // curved face (general loop path, single loop): the emitted triangles must follow the surface (reference: _rect_grid / refine_curved)
-                if !drop_degenerate && kind.name() != "plane" && std::env::var_os("RVT_NOREFINE").map_or(true, |x| x.is_empty()) {
+                if !drop_degenerate && kind.name() != "plane" && ends.len() == 1 && std::env::var_os("RVT_NOREFINE").map_or(true, |x| x.is_empty()) {
                     let nocol = std::env::var_os("RVT_NOCOLGRID").map_or(false, |x| !x.is_empty());
                     let kn = kind.name();
-                    let mut g = if ends.len() == 1 { rect_grid(&verts, &ev, 48) } else { None };
-                    if g.is_none() && !nocol && ends.len() == 1 && (kn == "ruled" || kn == "hermite") { g = col_grid(&verts, &ev, 1500); }
+                    let mut g = rect_grid(&verts, &ev, 48);
+                    if g.is_none() && !nocol && (kn == "ruled" || kn == "hermite") { g = col_grid(&verts, &ev, 1500); }
                     if let Some((gv, gt)) = g.take() {
                         g = Some(if kn == "ruled" && gt.len() <= 2 && !nocol { subdivide_grid(gv, gt, &ev, refine_rel(), 0.0033, 6000, 5) } else { (gv, gt) });
                     }
-                    let noholes = std::env::var_os("RVT_NOHOLEREFINE").map_or(false, |x| !x.is_empty());
-                    let nosplit = std::env::var_os("RVT_NOSPLITCOL").map_or(false, |x| !x.is_empty());
-                    let tri3 = |idx: &[u32]| -> Vec<[usize; 3]> { (0..idx.len() / 3).map(|k| [idx[3 * k] as usize, idx[3 * k + 1] as usize, idx[3 * k + 2] as usize]).collect() };
-                    let (nv, tl) = match g {
-                        Some(g) => g,
-                        None if ends.len() == 1 || !noholes => {
-                            let mut idx2 = idx.clone();
-                            if !nosplit { idx2 = split_collinear(&verts, &tri3(&idx)).iter().flat_map(|x| [x[0] as u32, x[1] as u32, x[2] as u32]).collect(); }
-                            let (nv, mut tl) = refine_curved(&verts, &idx2, &ev, refine_rel(), 0.0033, 2000, Some(&ends));
-                            if !nosplit { tl = split_collinear(&nv, &tl); }
-                            (nv, tl)
-                        }
-                        None => (verts.clone(), tri3(&idx)),
-                    };
+                    let (nv, tl) = match g { Some(g) => g, None => refine_curved(&verts, &idx, &ev, refine_rel(), 0.0033, 2000) };
                     verts = nv;
                     idx = tl.iter().flat_map(|x| [x[0] as u32, x[1] as u32, x[2] as u32]).collect();
                 }
@@ -1817,56 +1804,9 @@ pub fn subdivide_grid(v0: Vec<UV>, t0: Vec<[usize; 3]>, ev: &Surf, rel_tol: f64,
     (v, t)
 }
 
-/// rvt_mesh._split_collinear: earcut emits zero-area (in uv) triangles on collinear loop samples; each such sliver (a, j, b with j between a and b) is removed and its
-/// neighbour across the long edge (a, b) is split at j
-pub fn split_collinear(verts: &[UV], t0: &[[usize; 3]]) -> Vec<[usize; 3]> {
-    let eps: f64 = 1e-9;
-    let mut t: Vec<[usize; 3]> = t0.to_vec();
-    for _ in 0..(4 * t0.len() + 8) {
-        let mut bad = None;
-        for (ti, tr) in t.iter().enumerate() {
-            let (a, b, c) = (verts[tr[0]], verts[tr[1]], verts[tr[2]]);
-            let cr = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]);
-            let l2 = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).max((c[0] - b[0]).powi(2) + (c[1] - b[1]).powi(2)).max((a[0] - c[0]).powi(2) + (a[1] - c[1]).powi(2));
-            if cr.abs() <= eps.max(2e-3 * l2) { bad = Some(ti); break; }
-        }
-        let bad = match bad { Some(b) => b, None => break };
-        let tr = t[bad];
-        let mut found: Option<(usize, [usize; 3], [usize; 3])> = None;
-        'r: for r in 0..3 {
-            let (j, a, b) = (tr[r], tr[(r + 1) % 3], tr[(r + 2) % 3]);
-            let (pj, pa, pb) = (verts[j], verts[a], verts[b]);
-            let d = [pb[0] - pa[0], pb[1] - pa[1]];
-            let dd = d[0] * d[0] + d[1] * d[1];
-            if dd <= 0.0 { continue; }
-            let k = ((pj[0] - pa[0]) * d[0] + (pj[1] - pa[1]) * d[1]) / dd;
-            if !(1e-9 < k && k < 1.0 - 1e-9) { continue; }
-            for (ni, n) in t.iter().enumerate() {
-                if ni == bad { continue; }
-                for q in 0..3 {
-                    if n[q] == b && n[(q + 1) % 3] == a {
-                        let x = n[(q + 2) % 3];
-                        found = Some((ni, [b, j, x], [j, a, x]));
-                        break 'r;
-                    }
-                }
-            }
-        }
-        match found {
-            None => break,
-            Some((ni, n1, n2)) => {
-                let (hi, lo) = if ni > bad { (ni, bad) } else { (bad, ni) };
-                t.remove(hi); t.remove(lo);
-                t.push(n1); t.push(n2);
-            }
-        }
-    }
-    t
-}
-
 /// rvt_mesh.refine_curved: conforming refinement of an earcut triangulation of a curved face (interior edges bisected where the chord leaves the surface,
 /// loop-only triangles get their centroid); loop never changed
-pub fn refine_curved(verts: &[UV], idx: &[u32], ev: &Surf, rel_tol: f64, abs_tol: f64, max_tris: usize, ring_ends: Option<&[u32]>) -> (Vec<UV>, Vec<[usize; 3]>) {
+pub fn refine_curved(verts: &[UV], idx: &[u32], ev: &Surf, rel_tol: f64, abs_tol: f64, max_tris: usize) -> (Vec<UV>, Vec<[usize; 3]>) {
     let mut v: Vec<UV> = verts.to_vec();
     let mut t: Vec<[usize; 3]> = (0..idx.len() / 3).map(|k| [idx[3 * k] as usize, idx[3 * k + 1] as usize, idx[3 * k + 2] as usize]).collect();
     if t.is_empty() { return (v, t); }
@@ -1877,22 +1817,15 @@ pub fn refine_curved(verts: &[UV], idx: &[u32], ev: &Surf, rel_tol: f64, abs_tol
     let nloop = v.len();
     // the loop's own chord error: refining the interior beyond it adds triangles, not fidelity
     let mut bdev = 0.0f64;
-    let mut bnd: FxHashSet<(usize, usize)> = FxHashSet::default();
-    let ek = |a: usize, b: usize| -> (usize, usize) { (a.min(b), a.max(b)) };
-    // outer loop + hole loops: every ring is a closed boundary
-    let mut rings: Vec<(usize, usize)> = vec![];
-    let mut s0 = 0usize;
-    match ring_ends { Some(re) => for &e0 in re { rings.push((s0, e0 as usize)); s0 = e0 as usize; }, None => rings.push((0, nloop)) }
-    for (r0, r1) in rings {
-        for i in r0..r1 {
-            let j = if i + 1 < r1 { i + 1 } else { r0 };
-            let m = [(v[i][0] + v[j][0]) / 2.0, (v[i][1] + v[j][1]) / 2.0];
-            let c = add(p[i], p[j]);
-            bdev = bdev.max(norm(sub(ev.eval(m[0], m[1]), [c[0] / 2.0, c[1] / 2.0, c[2] / 2.0])));
-            bnd.insert(ek(i, j));
-        }
+    for i in 0..nloop {
+        let j = (i + 1) % nloop;
+        let m = [(v[i][0] + v[j][0]) / 2.0, (v[i][1] + v[j][1]) / 2.0];
+        let c = add(p[i], p[j]);
+        bdev = bdev.max(norm(sub(ev.eval(m[0], m[1]), [c[0] / 2.0, c[1] / 2.0, c[2] / 2.0])));
     }
     tol = tol.max(bdev);
+    let ek = |a: usize, b: usize| -> (usize, usize) { (a.min(b), a.max(b)) };
+    let bnd: FxHashSet<(usize, usize)> = (0..nloop).map(|i| ek(i, (i + 1) % nloop)).collect();
     let dev = |v: &Vec<UV>, p: &Vec<V3>, i: usize, j: usize| -> f64 {
         let m = [(v[i][0] + v[j][0]) / 2.0, (v[i][1] + v[j][1]) / 2.0];
         let c = add(p[i], p[j]);
