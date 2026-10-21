@@ -100,3 +100,4 @@ Next: element_mesh in Rust, params, binary cache, README timings.
 * 2026-10-21 (c8-rust) stacked-port check on 2026 Snowdon HVAC + Plumbing (remote-host, n=800 each): 1600/1600 bit-identical.
 * 2026-10-21 (c8-rust) g8_ refvol_all + mesh_all STARTED on remote-host as unit h1-c8g8 (log ssh remote-host tail ~/offload/c8g8.log; results ~/h1logs/rvt-core/h1_g8_*.log). Next: read results, refresh README table.
 * 2026-10-21 (c8-rust) g8_ refvol_all+mesh_all retry loop restarted (tests/h1_retry.sh c8g8b; gate 11 GB; earlier attempt failed on a wrong cd). Output logs/g8_retry.out.
+* 2026-10-21 (c8-rust) g8_refvol_all done 19:05 on remote-host: 78 ok, 0 failed, 0 DIFFERENT (released cap-6 build). g8 mesh_all running. rvt_params Python-only edits accepted via params_watch (rst_basic IDENTICAL).
