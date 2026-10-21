@@ -1659,6 +1659,21 @@ pub fn nearly_closed(tris: &[Tri], frac: f64, min_tris: usize) -> bool {
     (mesh_open_edges(tris, 5e-5) as f64) <= frac * 1.5 * tris.len() as f64
 }
 
+/// rvt_mesh.coincident_plane_pairs: face ids of planar faces that occur exactly twice with the same corner set (the shared cap of two stacked closed segments)
+pub fn coincident_plane_pairs(tris: &[Tri], meta: &[Meta], fid: &[i64]) -> std::collections::HashSet<i64> {
+    let mut sg: std::collections::BTreeMap<i64, Vec<usize>> = std::collections::BTreeMap::new();
+    for (j, f) in fid.iter().enumerate() { sg.entry(*f).or_default().push(j); }
+    let mut fsig: std::collections::HashMap<Vec<[i64; 3]>, Vec<i64>> = std::collections::HashMap::new();
+    for (f, js) in &sg {
+        if js.iter().all(|&j| meta[j].kind == "plane") {
+            let mut pts: Vec<[i64; 3]> = js.iter().flat_map(|&j| tris[j].iter()).map(|p| [(p[0] / 5e-5).round_ties_even() as i64, (p[1] / 5e-5).round_ties_even() as i64, (p[2] / 5e-5).round_ties_even() as i64]).collect();
+            pts.sort(); pts.dedup();
+            fsig.entry(pts).or_default().push(*f);
+        }
+    }
+    fsig.values().filter(|fs| fs.len() == 2).flat_map(|fs| fs.iter().copied()).collect()
+}
+
 /// total order on f64 for sorts: identical to partial_cmp on non-NaN values, NaN after everything (a NaN in decoded geometry must not panic the sort)
 #[inline]
 fn fcmp(a: &f64, b: &f64) -> std::cmp::Ordering { a.partial_cmp(b).unwrap_or_else(|| a.is_nan().cmp(&b.is_nan())) }

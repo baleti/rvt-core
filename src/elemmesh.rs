@@ -271,7 +271,14 @@ impl Ctx {
                     flags.push("closed_shell".into());
                     flags.push("per_node".into());
                 } else {
-                    let (st, sm, ok, lf) = select_closed_shell(&own, &ownm, &ownf, Some(&ownp));
+                    let (st, sm, mut ok, lf) = select_closed_shell(&own, &ownm, &ownf, Some(&ownp));
+                    if ok && std::env::var_os("RVT_NOSTACKED").is_none() {      // stacked closed segments (flex duct): the shared caps cancel and the whole chain is the body, not one segment
+                        let dp = coincident_plane_pairs(&own, &ownm, &ownf);
+                        if !dp.is_empty() {
+                            let rest: Vec<Tri> = own.iter().zip(ownf.iter()).filter(|(_, f)| !dp.contains(*f)).map(|(t, _)| *t).collect();
+                            if nearly_closed(&rest, 0.12, 40) { ok = false; }
+                        }
+                    }
                     if ok { own = st; ownm = sm; ownn = vec![0; own.len()]; ownf = lf.unwrap(); flags.push("closed_shell".into()); }
                 }
             }

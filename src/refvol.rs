@@ -166,7 +166,7 @@ pub fn refined_volume(tris: &[Tri], meta: &[Meta], levels: i32, tol: f64, fid: O
                     if norm(sub(pm, mid)) > 1e-6 * (1.0f64).max(norm(sub(pb, pa))) { du = du.max(dvv); }
                 }
             }
-            ((du.max(1e-9) / 0.1).log2().ceil().max(1.0).min(5.0)) as i32
+            ((du.max(1e-9) / volstep()).log2().ceil().max(1.0).min(6.0)) as i32
         } else { levels + 1 };
         // subdivision: each level replaces every triangle by its 4 children, child-major order (all first children, then all second, ...)
         let fan = if kind == "ruled" { fan_uv(&ev, &uv, 1usize << lv) } else { None };
@@ -452,4 +452,9 @@ pub fn body_summary_core(p: &[f64], nid: &[i64], fid: Option<&[i64]>, limit: usi
         rows.push((b, cnt, fid.map(|_| fs.len()), np_sum(&areas), odd[k], cs, lo, hi));
     }
     (rows, tb)
+}
+
+/// max uv step (rad) of a curved sub-triangle in volume integration (reference _VOLSTEP, env RVT_VOLSTEP)
+fn volstep() -> f64 {
+    std::env::var("RVT_VOLSTEP").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.1)
 }

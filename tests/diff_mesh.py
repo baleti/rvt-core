@@ -60,6 +60,7 @@ def side(which, f):
     tl = time.time() - t
     ids = sorted(e for e, i in idx.items() if i.get('bbox') and cen['cls'].get(e) and not cen['cls'][e].endswith('Symbol'))
     random.Random(7).shuffle(ids); ids = ids[:N]
+    if os.environ.get('IDS'): ids = [int(x) for x in os.environ['IDS'].split(',')]      # IDS=eid,eid: check these elements only
     out = {}; t = time.time()
     for e in ids:
         try: out[str(e)] = mdigest(mesh(e))
