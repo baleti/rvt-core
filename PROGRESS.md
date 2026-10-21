@@ -105,3 +105,4 @@ Next: element_mesh in Rust, params, binary cache, README timings.
 * 2026-10-22 (c8-rust) new tests/fuzz_meshdoc.py (MeshDoc element_mesh/element_meshes with random/invalid ids, extreme depth/detail): rst_basic 2022 x600, Residential 2020 x1200, 0 panics.
 * 2026-10-22 (c8-rust) diff_params Snowdon Plumbing 2024 (25738 elements) IDENTICAL after the cache-key fix (oracle 5.19 s, fast 3.49 s, remote-host capped).
 * 2026-10-22 (c8-rust) diff_params Snowdon HVAC 2024 (12679) and Electrical 2024 (19769) IDENTICAL.
+* 2026-10-22 (c8-rust) diff_params Snowdon 2026 HVAC (12791), Electrical (19901), Plumbing (25837) IDENTICAL. oracle_watch clean.
