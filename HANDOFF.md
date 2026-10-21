@@ -76,3 +76,9 @@ per-triangle mat, params ports, curved refinement ports, refined_volume in Rust 
 
 # c7-rust (claude7) 2026-10-19
 Takeover verified: suites all 0 DIFFERENT, oracle_watch clean after params_watch.sh (rst_basic IDENTICAL). Each round: sh tests/params_watch.sh (exit 2 = non-params module changed, port it). Blocked on remote-host memory gate: fullrep f7_ (README table refresh), Nanjing nothing open. Cached 40 MB open 0.9 s stays (needs lazy records, reference audit by c5-geometry).
+
+# c8-rust 2026-10-21 (stopped at orchestrator request)
+* Released and committed: refvol level cap 6 + RVT_VOLSTEP (46b64ea); stacked closed segments / flex ducts (coincident_plane_pairs, b8a8684). Both: diff checks identical, release --check, demo_smoke_all OK x3. oracle_watch clean, params snapshot accepted.
+* OPEN: g8_ full-corpus refvol_all + mesh_all on remote-host never started (MemAvailable < 11 GB gate). A tests/h1_retry.sh loop may still be running on remote-host (check pgrep -f h1_retry; kill it by PID); restart: nohup sh tests/h1_retry.sh NAME rvt -- sh -c "cd src/rvt-core && LOGP=g8_ FILE_MEM=4G tests/h1_suite.sh refvol_all mesh_all" &  then refresh the README table.
+* If c8-geometry reverts the flex-duct change in rvt_mesh/rvt_elemmesh, git revert b8a8684 and re-release.
+* 40 MB cached open 0.9 s (target 0.5 s) still open; needs lazy record fields, risky, not the demo path.
