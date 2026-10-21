@@ -98,3 +98,4 @@ Next: element_mesh in Rust, params, binary cache, README timings.
 * 2026-10-21 (c8-rust) stacked-segments port wider check: HVAC 2024 n=1600 bit-identical (1600/1600), RVT_NOSTACKED=1 parity on the two flex ducts identical. g8_ refvol_all + mesh_all on remote-host still queued (tests/h1_retry.sh, gate 11 GB).
 * 2026-10-21 (c8-rust) interim local refvol check of the cap-6 release (remote-host, 200 meshes/file): 7 more files across 2016-2024 (Arch_Link, rac_advanced, Technical_school, HVAC 2024, rme_basic, rst_basic 2019) all IDENTICAL(1e-9). Full g8_ corpus run still gated on remote-host.
 * 2026-10-21 (c8-rust) stacked-port check on 2026 Snowdon HVAC + Plumbing (remote-host, n=800 each): 1600/1600 bit-identical.
+* 2026-10-21 (c8-rust) g8_ refvol_all + mesh_all STARTED on remote-host as unit h1-c8g8 (log ssh remote-host tail ~/offload/c8g8.log; results ~/h1logs/rvt-core/h1_g8_*.log). Next: read results, refresh README table.
