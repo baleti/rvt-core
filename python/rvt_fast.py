@@ -149,8 +149,8 @@ def _extract(path, extra, only_ids, want_all, slim, two_stage=False):
     cache_slim = None if two_stage else slim_tags                 # two-stage: the cache holds the full variant
     cfn = hdr = None
     if only_ids is None and _cache_on():
-        hdr = json.dumps({'reader': reader_version(), 'schema': hashlib.sha1(o.openstream('Formats/Latest').read()).hexdigest(), 'file': file_key(path), 'W': W})
-        cfn = os.path.join(CACHE, '%s-x%s.rvtc' % (file_key(path), hashlib.sha1(repr((wl, EH, cache_slim)).encode()).hexdigest()[:10]))
+        hdr = json.dumps({'reader': reader_version(), 'schema': hashlib.sha1(o.openstream('Formats/Latest').read()).hexdigest(), 'file': file_key(path), 'W': W, 'stop': list(D.Dec.STOP)})
+        cfn = os.path.join(CACHE, '%s-x%s.rvtc' % (file_key(path), hashlib.sha1(repr((wl, EH, cache_slim, tuple(D.Dec.STOP))).encode()).hexdigest()[:10]))
         h = _rc().RecDecoder.cache_header(cfn)
         if h is not None:
             try: user = json.loads(h)['user']
