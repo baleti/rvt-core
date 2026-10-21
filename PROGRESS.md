@@ -107,3 +107,4 @@ Next: element_mesh in Rust, params, binary cache, README timings.
 * 2026-10-22 (c8-rust) diff_params Snowdon HVAC 2024 (12679) and Electrical 2024 (19769) IDENTICAL.
 * 2026-10-22 (c8-rust) diff_params Snowdon 2026 HVAC (12791), Electrical (19901), Plumbing (25837) IDENTICAL. oracle_watch clean.
 * 2026-10-22 (c8-rust) profile params Snowdon Plumbing 2026 (cProfile, inflated): rvt_params.params body 3.9 s self + 11.9M str.split calls (1.6 s) in the reference loop; Rust extract is only 1.8 s. No Rust entry point would help without porting the whole params loop (parity risk); left.
+* 2026-10-22 (c8-rust) fresh-cache timing 2026 Snowdon Site (127 MB .rvtc): cold decode+write 1.68 s, cached open 0.75-0.97 s (the earlier 3 s readings were the post-key-change cache rebuild under load, not a bug). 0.5 s target still needs lazy records.
