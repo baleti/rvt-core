@@ -82,3 +82,8 @@ Takeover verified: suites all 0 DIFFERENT, oracle_watch clean after params_watch
 * OPEN: g8_ full-corpus refvol_all + mesh_all on remote-host never started (MemAvailable < 11 GB gate). A tests/h1_retry.sh loop may still be running on remote-host (check pgrep -f h1_retry; kill it by PID); restart: nohup sh tests/h1_retry.sh NAME rvt -- sh -c "cd src/rvt-core && LOGP=g8_ FILE_MEM=4G tests/h1_suite.sh refvol_all mesh_all" &  then refresh the README table.
 * If c8-geometry reverts the flex-duct change in rvt_mesh/rvt_elemmesh, git revert b8a8684 and re-release.
 * 40 MB cached open 0.9 s (target 0.5 s) still open; needs lazy record fields, risky, not the demo path.
+
+# c8-rust 2026-10-21 late (stopped at orchestrator request)
+* g8_refvol_all done on remote-host: 78 ok, 0 failed, 0 DIFFERENT (released cap-6 build).
+* g8_mesh_all running on remote-host (unit h1-c8g8b, started by tests/h1_retry.sh): 38/78 files, all 0 DIFFERENT so far, no errors. Resumable: results ~/h1logs/rvt-core/h1_g8_mesh.log (skips finished files). When done: read h1_summary.log, refresh the README differential table, commit.
+* rvt_params Python-only edits were accepted via tests/params_watch.sh (rst_basic IDENTICAL) several times; oracle_watch otherwise clean. Nothing uncommitted except pyc/handoff screen files.
