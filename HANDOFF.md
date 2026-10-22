@@ -93,3 +93,5 @@ Takeover verified: suites all 0 DIFFERENT, oracle_watch clean after params_watch
 * g8_ refvol_all + mesh_all 78/78 0 DIFFERENT. tests/fuzz_meshdoc.py: 0 panics. params_watch accepted repeatedly (rvt_params Python-only).
 * Routine: sh tests/oracle_watch.sh; if only rvt_params.py/rvt_geom.py changed -> sh tests/params_watch.sh. Mesh changes: wait ~1 h, check PYTHON_REFERENCE_CHANGES.md, then port.
 * Open: 40 MB cached open 0.75-1.0 s (target 0.5 s; needs lazy record fields, risky, not demo path). 2026 Plumbing params: Rust no faster than reference (time is the Python params loop).
+
+# c8-rust stop note (2026-10-22): all work committed (last: 7789ba6 cache key + tests). params_watch accepted through the latest rvt_params.py. Routine: sh tests/oracle_watch.sh then sh tests/params_watch.sh. Open: 40 MB cached open 0.75-1.0 s (target 0.5 s, lazy records, risky).
