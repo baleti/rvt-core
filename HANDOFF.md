@@ -87,3 +87,9 @@ Takeover verified: suites all 0 DIFFERENT, oracle_watch clean after params_watch
 * g8_refvol_all done on remote-host: 78 ok, 0 failed, 0 DIFFERENT (released cap-6 build).
 * g8_mesh_all running on remote-host (unit h1-c8g8b, started by tests/h1_retry.sh): 38/78 files, all 0 DIFFERENT so far, no errors. Resumable: results ~/h1logs/rvt-core/h1_g8_mesh.log (skips finished files). When done: read h1_summary.log, refresh the README differential table, commit.
 * rvt_params Python-only edits were accepted via tests/params_watch.sh (rst_basic IDENTICAL) several times; oracle_watch otherwise clean. Nothing uncommitted except pyc/handoff screen files.
+
+# c8-rust 2026-10-22 (claude8)
+* Released 7789ba6: binary cache key includes Dec.STOP (fixed the "incomplete MEP records" report; test: tests/test_cache_stop.py FILE). MEP params (Snowdon HVAC/Electrical/Plumbing 2024+2026) IDENTICAL vs reference.
+* g8_ refvol_all + mesh_all 78/78 0 DIFFERENT. tests/fuzz_meshdoc.py: 0 panics. params_watch accepted repeatedly (rvt_params Python-only).
+* Routine: sh tests/oracle_watch.sh; if only rvt_params.py/rvt_geom.py changed -> sh tests/params_watch.sh. Mesh changes: wait ~1 h, check PYTHON_REFERENCE_CHANGES.md, then port.
+* Open: 40 MB cached open 0.75-1.0 s (target 0.5 s; needs lazy record fields, risky, not demo path). 2026 Plumbing params: Rust no faster than reference (time is the Python params loop).
