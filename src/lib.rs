@@ -14,6 +14,7 @@ mod params;
 mod cache;
 mod pack;
 mod hlr;
+mod fmtparse;
 use flate2::bufread::DeflateDecoder;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -145,6 +146,7 @@ fn header_candidates(py: Python<'_>, chunk: &[u8], ids_sorted: Vec<u64>, w: usiz
 fn rvt_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     init_pool();
     m.add_function(wrap_pyfunction!(strip_pages, m)?)?;
+    m.add_function(wrap_pyfunction!(fmtparse::parse_formats, m)?)?;
     m.add_function(wrap_pyfunction!(select_closed_shell_dbg, m)?)?;
     m.add_function(wrap_pyfunction!(elemmesh::refined_volume, m)?)?;
     m.add_function(wrap_pyfunction!(elemmesh::tessellate_geometry_py, m)?)?;
