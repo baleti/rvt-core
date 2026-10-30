@@ -22,7 +22,9 @@ def load(path, log=print, model=None):
 
 def _curved():
     try:
-        sys.path.insert(0, os.path.expanduser('~/src/rvt-viewer')); from rvtviewer.build import CURVED_SURFACES; return set(CURVED_SURFACES)
+        _p = os.path.expanduser('~/src/rvt-viewer')
+        if _p not in sys.path: sys.path.insert(0, _p)
+        from rvtviewer.build import CURVED_SURFACES; return set(CURVED_SURFACES)
     except Exception: return {'cylinder', 'cone', 'revolution', 'ruled', 'hermite'}
 
 def _result(r, full=None):
