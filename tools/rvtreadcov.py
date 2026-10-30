@@ -7,11 +7,18 @@ and with --records the per-class record decode counts from rvt-research cov_year
 import sys, os, json, hashlib, re, subprocess, time
 RR = os.path.expanduser('~/rvt-research'); sys.path.insert(0, RR)
 DECODED = re.compile(r'^(Formats/Latest|Global/ElemTable|Partitions/\d+|BasicFileInfo|Global/PartitionTable|Global/Latest|Global/History|Global/ContentDocuments)$')
+def truncated(o, p):
+    """olefile pads a truncated file with zeros instead of failing: the sectors the directory says exist must fit in the file"""
+    ss = o.sectorsize; need = 1 + -(-o.root.size // ss)
+    for e in o.direntries:
+        if e is not None and e.entry_type == 2 and e.size >= o.minisectorcutoff: need += -(-e.size // ss)
+    return os.path.getsize(p) < need * ss
 def stream_inventory(p):
     import olefile
     from rvtfmt import inflate_stream
     out = {}
     o = olefile.OleFileIO(p)
+    if truncated(o, p): raise ValueError('file truncated: directory needs more sectors than the file holds')
     for e in o.listdir(streams=True, storages=False):
         n = '/'.join(e)
         try:
