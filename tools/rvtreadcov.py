@@ -13,6 +13,20 @@ def truncated(o, p):
     for e in o.direntries:
         if e is not None and e.entry_type == 2 and e.size >= o.minisectorcutoff: need += -(-e.size // ss)
     return os.path.getsize(p) < need * ss
+def check_members(raw):
+    """every gzip member of a paged stream must inflate and match its CRC32/ISIZE trailer (rvt2text.segments skips bad members silently)"""
+    import zlib, struct
+    from rvtfmt import strip_pages, GZ
+    data = strip_pages(raw); pos = n = 0
+    while True:
+        i = data.find(GZ, pos)
+        if i < 0: return n
+        d = zlib.decompressobj(-15)
+        try: out = d.decompress(memoryview(data)[i + 10:])
+        except zlib.error as x: raise ValueError('member %d at %d: zlib %s' % (n, i, x))
+        tr = d.unused_data[:8]
+        if len(tr) == 8 and (struct.unpack('<II', tr) != (zlib.crc32(out) & 0xffffffff, len(out) & 0xffffffff)): raise ValueError('member %d at %d: CRC/ISIZE mismatch' % (n, i))
+        n += 1; pos = len(data) - len(d.unused_data) + (8 if len(tr) == 8 else 0)
 def stream_inventory(p):
     import olefile
     from rvtfmt import inflate_stream
@@ -30,6 +44,7 @@ def stream_inventory(p):
                 import rvt2text as T
                 segs = list(T.segments(raw))
                 if not segs: raise ValueError('no gzip segment')
+                check_members(raw)
                 st = 'decoded'
             elif n == 'BasicFileInfo':
                 st = 'decoded'

@@ -15,4 +15,12 @@ class Hostile(unittest.TestCase):
     def test_tail_truncated(self):
         n = os.path.getsize(SRC); r = run(self.mk(open(SRC, 'rb').read(n - 700000)))
         self.assertIn('truncated', r['open'])   # olefile zero-pads; must not read as ok
+    def test_bitflip_in_partition(self):
+        import olefile
+        f = self.mk(open(SRC, 'rb').read()); o = olefile.OleFileIO(f, write_mode=True)
+        n = [('/'.join(e)) for e in o.listdir(streams=True) if e[0] == 'Partitions'][0]
+        import random; random.seed(1); d = bytearray(o.openstream(n).read())
+        for _ in range(5): d[random.randrange(len(d) // 4, len(d) * 3 // 4)] ^= 0xff
+        o.write_stream(n, bytes(d)); o.close()
+        r = run(f); self.assertIn('CRC', r['open'] + str(r.get('streams')))   # corrupted deflate data must not read as decoded
 if __name__ == '__main__': unittest.main()
