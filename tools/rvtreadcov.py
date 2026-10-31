@@ -55,7 +55,7 @@ def stream_inventory(p):
             elif n.startswith('\x05') or n.startswith('TransmissionData') or n.startswith('RevitPreview') or n == 'Contents':
                 st = 'opaque'
             else:
-                inflate_stream(raw); st = 'decoded' if DECODED.match(n) else 'opaque'
+                inflate_stream(raw); check_members(raw); st = 'decoded' if DECODED.match(n) else 'opaque'
         except Exception as x:
             st = 'error:' + type(x).__name__ + ' ' + str(x)[:40]
         k = 'Partitions/N' if n.startswith('Partitions/') else n

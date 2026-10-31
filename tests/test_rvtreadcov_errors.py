@@ -23,4 +23,11 @@ class Hostile(unittest.TestCase):
         for _ in range(5): d[random.randrange(len(d) // 4, len(d) * 3 // 4)] ^= 0xff
         o.write_stream(n, bytes(d)); o.close()
         r = run(f); self.assertIn('CRC', r['open'] + str(r.get('streams')))   # corrupted deflate data must not read as decoded
+    def test_bitflip_in_elemtable(self):
+        import olefile, random
+        f = self.mk(open(SRC, 'rb').read()); o = olefile.OleFileIO(f, write_mode=True)
+        d = bytearray(o.openstream('Global/ElemTable').read()); random.seed(3)
+        for _ in range(3): d[random.randrange(len(d) // 3, len(d) * 2 // 3)] ^= 0xff
+        o.write_stream('Global/ElemTable', bytes(d)); o.close()
+        self.assertIn('CRC', str(run(f).get('streams')))
 if __name__ == '__main__': unittest.main()
