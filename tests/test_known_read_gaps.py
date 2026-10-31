@@ -16,4 +16,20 @@ class Gaps(unittest.TestCase):
     @unittest.expectedFailure
     def test_every_element_has_a_header(self):
         self.assertFalse(KNOWN & self.missing)
+
+SAMPLE = (glob.glob(RR + '/corpus/2024/69_*.rte') or [None])[0]
+@unittest.skipUnless(SAMPLE, 'sample corpus absent')
+class DamagedInput(unittest.TestCase):
+    """zeroing 100 KB inside the file silently drops records today (330 of 1773); a fix must raise or flag it"""
+    @unittest.expectedFailure
+    def test_damage_is_not_silent(self):
+        import tempfile, rvt_entities as E
+        os.environ['RVT_NOCACHE'] = os.environ['RVT_CORE_NOCACHE'] = '1'
+        good = len(E.extract(SAMPLE)['recs'])
+        d = bytearray(open(SAMPLE, 'rb').read()); d[1000000:1100000] = bytes(100000)
+        with tempfile.NamedTemporaryFile(suffix='.rvt') as t:
+            t.write(d); t.flush()
+            try: n = len(E.extract(t.name)['recs'])
+            except Exception: return                       # raising is acceptable
+            self.assertEqual(n, good, 'records silently lost: %d of %d' % (good - n, good))
 if __name__ == '__main__': unittest.main()
