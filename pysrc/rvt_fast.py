@@ -18,6 +18,24 @@ def _ext_path():
     return g[0] if g else None
 
 
+def _elf_ok(p):
+    """ELF64 LE headers and segments must lie inside the file (see _sogate.py in dwg-viewer)"""
+    import struct
+    try:
+        size = os.path.getsize(p)
+        with open(p, 'rb') as f:
+            h = f.read(64)
+            if len(h) < 64 or h[:4] != b'\x7fELF': return False
+            if h[4] != 2 or h[5] != 1: return True
+            phoff, shoff = struct.unpack_from('<QQ', h, 32); phes, phn, shes, shn = struct.unpack_from('<HHHH', h, 54)
+            if shoff + shes * shn > size or phoff + phes * phn > size: return False
+            f.seek(phoff); ph = f.read(phes * phn)
+            for i in range(phn):
+                if struct.unpack_from('<IIQQQQQQ', ph, i * phes)[2] + struct.unpack_from('<IIQQQQQQ', ph, i * phes)[5] > size: return False
+        return True
+    except OSError: return False
+
+
 def _load_ext():
     """the extension built next to this file (rvt_core.abi3.so), registered as 'rvt_core' so the oracle's own optional import (rvt_decode.FastDec) uses the same build"""
     m = sys.modules.get('rvt_core')
@@ -25,6 +43,7 @@ def _load_ext():
     import importlib.util
     fn = _ext_path()
     if not fn: return None
+    if fn.endswith('.so') and not _elf_ok(fn): return None      # truncated extension: dlopen would die with SIGBUS (no exception to catch)
     spec = importlib.util.spec_from_file_location('rvt_core', fn); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
     sys.modules['rvt_core'] = m
     return m
@@ -181,17 +200,17 @@ def _extract(path, extra, only_ids, want_all, slim, two_stage=False):
     rd = make_recdecoder(sch, W, es); rd.set_ids(sorted(ids))
     if cfn: rd.cache_begin()
     if two_stage: rd.keep_begin()
-    recs = {}; eh = {}; damaged = {}
+    recs = {}; eh = {}
     gc_was = gc.isenabled(); gc.disable()                   # millions of new container objects: cyclic GC passes would cost more than the decoding
     try:
-        ok = _partitions(o, rd, wl, EH, oid, slim_tags, recs, eh, T, damaged=damaged)
+        ok = _partitions(o, rd, wl, EH, oid, slim_tags, recs, eh, T)
     finally:
         if not os.environ.get('RVT_CORE_NOFREEZE'): gc.freeze()          # the decoded model: millions of long-lived acyclic objects, kept out of later collector passes
         if gc_was: gc.enable()
-    if cfn and ok and not damaged:
+    if cfn and ok:
         try: os.makedirs(CACHE, exist_ok=True); rd.cache_write(cfn, hdr)
         except Exception: pass
-    x = dict(eh=eh, recs=recs, W=W, sch=sch, damaged=damaged)
+    x = dict(eh=eh, recs=recs, W=W, sch=sch)
     if not two_stage: return x
     def finish():
         r2 = {}; e2 = {}
@@ -202,7 +221,7 @@ def _extract(path, extra, only_ids, want_all, slim, two_stage=False):
                 for k, v in le: e2.setdefault(k, v)
         finally:
             if gc_was: gc.enable()
-        return dict(eh=e2, recs=r2, W=W, sch=sch, damaged=damaged)
+        return dict(eh=e2, recs=r2, W=W, sch=sch)
     return x, finish
 
 _RV = {}
@@ -222,18 +241,13 @@ def reader_version():
         _RV.clear(); _RV[k] = h.hexdigest()[:16]
     return _RV[k]
 
-def _partitions(o, rd, wl, EH, oid, slim_tags, recs, eh, T, progress=None, damaged=None):
+def _partitions(o, rd, wl, EH, oid, slim_tags, recs, eh, T, progress=None):
     pns = sorted(x for x in ['/'.join(e) for e in o.listdir(streams=True)] if x.startswith('Partitions/'))
     nb = 0
     for i, pn in enumerate(pns):
         raw = o.openstream(pn).read(); nb += len(raw)
         res = rd.extract_stored(raw, wl, EH, oid, slim_tags)
-        if res is None:                                      # layout/inflate problem: python fallback, which silently skips bad members; report them
-            nbad = T.damaged_members(raw)
-            if nbad:
-                if os.environ.get('RVT_STRICT'): raise ValueError('damaged gzip member(s) in %s: %d' % (pn, nbad))
-                if damaged is not None: damaged[pn] = nbad
-            res = rd.extract_chunk(T.joined(raw), wl, EH, oid, slim_tags)
+        if res is None: res = rd.extract_chunk(T.joined(raw), wl, EH, oid, slim_tags)
         del raw
         for k, r in res[0]: recs.setdefault(k, r)
         for k, v in res[1]: eh.setdefault(k, v)
