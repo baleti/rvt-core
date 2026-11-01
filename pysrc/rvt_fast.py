@@ -181,17 +181,17 @@ def _extract(path, extra, only_ids, want_all, slim, two_stage=False):
     rd = make_recdecoder(sch, W, es); rd.set_ids(sorted(ids))
     if cfn: rd.cache_begin()
     if two_stage: rd.keep_begin()
-    recs = {}; eh = {}
+    recs = {}; eh = {}; damaged = {}
     gc_was = gc.isenabled(); gc.disable()                   # millions of new container objects: cyclic GC passes would cost more than the decoding
     try:
-        ok = _partitions(o, rd, wl, EH, oid, slim_tags, recs, eh, T)
+        ok = _partitions(o, rd, wl, EH, oid, slim_tags, recs, eh, T, damaged=damaged)
     finally:
         if not os.environ.get('RVT_CORE_NOFREEZE'): gc.freeze()          # the decoded model: millions of long-lived acyclic objects, kept out of later collector passes
         if gc_was: gc.enable()
-    if cfn and ok:
+    if cfn and ok and not damaged:
         try: os.makedirs(CACHE, exist_ok=True); rd.cache_write(cfn, hdr)
         except Exception: pass
-    x = dict(eh=eh, recs=recs, W=W, sch=sch)
+    x = dict(eh=eh, recs=recs, W=W, sch=sch, damaged=damaged)
     if not two_stage: return x
     def finish():
         r2 = {}; e2 = {}
@@ -202,7 +202,7 @@ def _extract(path, extra, only_ids, want_all, slim, two_stage=False):
                 for k, v in le: e2.setdefault(k, v)
         finally:
             if gc_was: gc.enable()
-        return dict(eh=e2, recs=r2, W=W, sch=sch)
+        return dict(eh=e2, recs=r2, W=W, sch=sch, damaged=damaged)
     return x, finish
 
 _RV = {}
@@ -222,13 +222,18 @@ def reader_version():
         _RV.clear(); _RV[k] = h.hexdigest()[:16]
     return _RV[k]
 
-def _partitions(o, rd, wl, EH, oid, slim_tags, recs, eh, T, progress=None):
+def _partitions(o, rd, wl, EH, oid, slim_tags, recs, eh, T, progress=None, damaged=None):
     pns = sorted(x for x in ['/'.join(e) for e in o.listdir(streams=True)] if x.startswith('Partitions/'))
     nb = 0
     for i, pn in enumerate(pns):
         raw = o.openstream(pn).read(); nb += len(raw)
         res = rd.extract_stored(raw, wl, EH, oid, slim_tags)
-        if res is None: res = rd.extract_chunk(T.joined(raw), wl, EH, oid, slim_tags)
+        if res is None:                                      # layout/inflate problem: python fallback, which silently skips bad members; report them
+            nbad = T.damaged_members(raw)
+            if nbad:
+                if os.environ.get('RVT_STRICT'): raise ValueError('damaged gzip member(s) in %s: %d' % (pn, nbad))
+                if damaged is not None: damaged[pn] = nbad
+            res = rd.extract_chunk(T.joined(raw), wl, EH, oid, slim_tags)
         del raw
         for k, r in res[0]: recs.setdefault(k, r)
         for k, v in res[1]: eh.setdefault(k, v)

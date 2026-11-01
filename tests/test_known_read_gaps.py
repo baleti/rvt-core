@@ -20,16 +20,24 @@ class Gaps(unittest.TestCase):
 SAMPLE = (glob.glob(RR + '/corpus/2024/69_*.rte') or [None])[0]
 @unittest.skipUnless(SAMPLE, 'sample corpus absent')
 class DamagedInput(unittest.TestCase):
-    """zeroing 100 KB inside the file silently drops records today (330 of 1773); a fix must raise or flag it"""
-    @unittest.expectedFailure
-    def test_damage_is_not_silent(self):
-        import tempfile, rvt_entities as E
-        os.environ['RVT_NOCACHE'] = os.environ['RVT_CORE_NOCACHE'] = '1'
-        good = len(E.extract(SAMPLE)['recs'])
-        d = bytearray(open(SAMPLE, 'rb').read()); d[1000000:1100000] = bytes(100000)
-        with tempfile.NamedTemporaryFile(suffix='.rvt') as t:
-            t.write(d); t.flush()
-            try: n = len(E.extract(t.name)['recs'])
-            except Exception: return                       # raising is acceptable
-            self.assertEqual(n, good, 'records silently lost: %d of %d' % (good - n, good))
+    """damaged gzip members are flagged in extract()['damaged'] (and raise with RVT_STRICT=1); clean file reports none"""
+    def _damaged_copy(self, fn):
+        import tempfile
+        d = bytearray(open(SAMPLE, 'rb').read()); fn(d)
+        t = tempfile.NamedTemporaryFile(suffix='.rvt'); t.write(d); t.flush(); return t
+    def setUp(self):
+        os.environ['RVT_NOCACHE'] = os.environ['RVT_CORE_NOCACHE'] = '1'; os.environ.pop('RVT_STRICT', None)
+    def test_clean_file_reports_no_damage(self):
+        import rvt_entities as E
+        self.assertEqual(E.extract(SAMPLE).get('damaged'), {})
+    def test_zeroed_region_is_flagged(self):
+        import rvt_entities as E
+        t = self._damaged_copy(lambda d: d.__setitem__(slice(1000000, 1100000), bytes(100000)))
+        self.assertTrue(E.extract(t.name)['damaged'], 'silent record loss: damage not reported')
+    def test_strict_mode_raises(self):
+        import rvt_entities as E
+        t = self._damaged_copy(lambda d: d.__setitem__(slice(1000000, 1100000), bytes(100000)))
+        os.environ['RVT_STRICT'] = '1'
+        try: self.assertRaises(ValueError, E.extract, t.name)
+        finally: os.environ.pop('RVT_STRICT', None)
 if __name__ == '__main__': unittest.main()
