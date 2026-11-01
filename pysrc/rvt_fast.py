@@ -8,13 +8,23 @@ if READER not in sys.path: sys.path.append(READER)
 if HERE not in sys.path: sys.path.insert(0, HERE)
 os.environ.setdefault('RVT_GEOM', '1')
 
+def _ext_path():
+    """the compiled extension next to this file: rvt_core.abi3.so (Linux, macOS) or rvt_core.pyd / rvt_core.*.pyd (Windows, maturin); None when absent"""
+    import glob
+    for n in ('rvt_core.abi3.so', 'rvt_core.pyd'):
+        p = os.path.join(HERE, n)
+        if os.path.exists(p): return p
+    g = sorted(glob.glob(os.path.join(HERE, 'rvt_core.*.pyd')) + glob.glob(os.path.join(HERE, 'rvt_core.*.so')))
+    return g[0] if g else None
+
+
 def _load_ext():
     """the extension built next to this file (rvt_core.abi3.so), registered as 'rvt_core' so the oracle's own optional import (rvt_decode.FastDec) uses the same build"""
     m = sys.modules.get('rvt_core')
     if m is not None and hasattr(m, 'RecDecoder') and hasattr(m.RecDecoder, 'extract_stored'): return m
     import importlib.util
-    fn = os.path.join(HERE, 'rvt_core.abi3.so')
-    if not os.path.exists(fn): return None
+    fn = _ext_path()
+    if not fn: return None
     spec = importlib.util.spec_from_file_location('rvt_core', fn); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
     sys.modules['rvt_core'] = m
     return m
@@ -201,7 +211,7 @@ def reader_version():
     import hashlib
     fs = ['rvt_decode.py', 'rvt_entities.py', 'rvt_scan.py', 'rvt_es.py', 'fmt_parser.py', 'rvtfmt.py', 'rvt2text.py', 'rvt_inventory.py']
     st = tuple((f, os.stat(os.path.join(READER, f)).st_mtime_ns) for f in fs if os.path.exists(os.path.join(READER, f)))
-    so = os.path.join(HERE, 'rvt_core.abi3.so'); sst = os.stat(so) if os.path.exists(so) else None
+    so = _ext_path(); sst = os.stat(so) if so else None
     me = os.stat(os.path.abspath(__file__)).st_mtime_ns                   # this adapter's own code (Python-side ports) is part of the key too
     k = (st, sst and (sst.st_size, sst.st_mtime_ns), me)
     if k not in _RV:

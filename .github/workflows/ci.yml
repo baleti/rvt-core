@@ -1,0 +1,30 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  wheels:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, name: linux-x86_64}
+          - {os: windows-latest, name: windows-x86_64}
+          - {os: macos-14, name: macos-arm64}
+          - {os: macos-15-intel, name: macos-x86_64}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: dtolnay/rust-toolchain@stable
+      - run: python -m pip install maturin==1.7.4 pytest
+      # abi3-py39: one wheel per OS/arch serves every CPython >= 3.9 (rvt_core.abi3.so on Linux/macOS, rvt_core.pyd on Windows)
+      - run: maturin build --release --out dist
+      - name: install wheel, import, load through the adapter
+        shell: bash
+        run: |
+          python -m pip install --no-index --find-links dist rvt_core
+          python -c "import rvt_core; assert hasattr(rvt_core, 'RecDecoder'), dir(rvt_core)"
+      - name: pure-Python fallback and extension lookup (synthetic, no extension needed)
+        run: python -m pytest -q tests/test_ext_path.py
+      - uses: actions/upload-artifact@v4
+        with: {name: 'rvt_core-${{ matrix.name }}', path: dist/*.whl}
