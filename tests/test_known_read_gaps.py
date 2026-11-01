@@ -40,4 +40,13 @@ class DamagedInput(unittest.TestCase):
         os.environ['RVT_STRICT'] = '1'
         try: self.assertRaises(ValueError, E.extract, t.name)
         finally: os.environ.pop('RVT_STRICT', None)
+@unittest.skipUnless(SAMPLE, 'sample corpus absent')
+class Truncated(unittest.TestCase):
+    def test_tail_truncation_is_an_error(self):
+        import tempfile, rvt_scan as S
+        raw = open(SAMPLE, 'rb').read(); S.load(SAMPLE)
+        for frac in (0.999, 0.9, 0.5):
+            with tempfile.NamedTemporaryFile(suffix='.rvt') as t:
+                t.write(raw[:int(len(raw) * frac)]); t.flush()
+                with self.assertRaises(ValueError, msg='truncated to %s accepted' % frac): S.load(t.name)
 if __name__ == '__main__': unittest.main()
