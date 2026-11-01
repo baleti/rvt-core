@@ -50,3 +50,12 @@ class Truncated(unittest.TestCase):
                 t.write(raw[:int(len(raw) * frac)]); t.flush()
                 with self.assertRaises(ValueError, msg='truncated to %s accepted' % frac): S.load(t.name)
 if __name__ == '__main__': unittest.main()
+
+
+class Id0Flag(unittest.TestCase):
+    """records filed under element id 0 are reported in extract()['suspect'] so comparison code can exclude them"""
+    @unittest.skipUnless(SAMPLE, 'no sample')
+    def test_suspect_listed(self):
+        import rvt_entities as E
+        r = E.extract(SAMPLE)
+        self.assertEqual(r['suspect'], sorted(k for k in r['recs'] if k[0] == 0))
