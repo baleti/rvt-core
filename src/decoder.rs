@@ -241,7 +241,10 @@ impl RecDecoder {
                 f.write_all(&blocks)?;
                 f.flush()?;
             }
-            std::fs::rename(&tmp, &path)
+            // Windows: the target may be mapped by another reader (sharing violation); never leave the temp behind
+            let r = std::fs::rename(&tmp, &path);
+            if r.is_err() { let _ = std::fs::remove_file(&tmp); }
+            r
         });
         self.writer = Some(h);
         Ok(())
