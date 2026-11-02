@@ -439,7 +439,7 @@ def refined_volume(tris, meta, levels=3, tol=5e-5, centroid=False, fid=None):
 # ---------------- progress file + streaming meshes for the viewer ----------------
 def file_key(f):
     import hashlib
-    st = os.stat(f); return hashlib.sha1(('%s|%d|%d' % (os.path.abspath(f), st.st_size, int(st.st_mtime))).encode()).hexdigest()[:16]
+    st = os.stat(f); return hashlib.sha1(('%s|%d|%d|%d' % (os.path.abspath(f), st.st_size, st.st_mtime_ns, st.st_ino)).encode()).hexdigest()[:16]
 
 class Progress:
     """~/.cache/rvt-progress/<file key>.json, rewritten (atomically) at most every 250 ms while work runs and once at every stage change:
