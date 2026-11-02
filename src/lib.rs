@@ -86,6 +86,17 @@ fn inflate_one(data: &[u8], sp: (usize, usize)) -> Option<Vec<u8>> {
     if body.len() - consumed > 8 {
         return None;
     }
+    // Only members whose gzip trailer (CRC32, ISIZE) matches are accepted here: a damaged member that miniz still "decodes" must not
+    // differ from the Python reference (zlib rejects or skips it); None sends the caller to the Python path (item 33 of c3x-c4x-native).
+    let tr = &body[consumed..];
+    if tr.len() < 8 {
+        return None;
+    }
+    let mut crc = flate2::Crc::new();
+    crc.update(&out);
+    if u32::from_le_bytes(tr[0..4].try_into().ok()?) != crc.sum() || u32::from_le_bytes(tr[4..8].try_into().ok()?) != out.len() as u32 {
+        return None;
+    }
     Some(out)
 }
 
