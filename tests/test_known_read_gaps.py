@@ -133,6 +133,17 @@ class DirectorySizeCut(unittest.TestCase):
         big = max((e for e in o.direntries if e is not None and e.entry_type == 2 and e.name.isdigit()), key=lambda e: e.size)
         t = self._cut(big.name, big.size // 3)
         self.assertRaises(ValueError, R.load, t.name)
+    def test_fat_entry_redirected_back_inside_own_chain_rejected(self):
+        import struct, tempfile, olefile, rvt_scan as R
+        d0 = open(SAMPLE, 'rb').read(); o = olefile.OleFileIO(SAMPLE); ss = o.sectorsize; per = ss // 4
+        big = max((e for e in o.direntries if e is not None and e.entry_type == 2), key=lambda e: e.size)
+        chain = [big.isectStart]
+        while len(chain) < 200: chain.append(o.fat[chain[-1]])
+        sec = chain[50]; fatsec = struct.unpack_from('<I', d0, 76 + 4 * (sec // per))[0]
+        d = bytearray(d0); struct.pack_into('<I', d, (fatsec + 1) * ss + 4 * (sec % per), chain[46])    # a 4-sector loop inside the chain (as the measured bit flip 5540 -> 5536)
+        t = tempfile.NamedTemporaryFile(suffix='.rvt'); t.write(d); t.flush()
+        self.assertRaises(ValueError, R.check_fat_consistent, olefile.OleFileIO(t.name))     # load() may reject it earlier for other reasons; the FAT check alone must see it
+        R.check_fat_consistent(olefile.OleFileIO(SAMPLE))
     def test_clean_loads(self):
         import rvt_scan as R
         R.load(SAMPLE)
