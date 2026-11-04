@@ -163,4 +163,17 @@ class DirectorySizeCut(unittest.TestCase):
             d = bytearray(open(SAMPLE, 'rb').read()); d[off(b):off(b) + 66] = d[off(a):off(a) + 66]
             t = tempfile.NamedTemporaryFile(suffix='.rvt'); t.write(d); t.flush()
             self.assertRaises(ValueError, R.load, t.name)
+
+
+class InflateBomb(unittest.TestCase):
+    """a few KB of deflate that expand to far more than any real block must be a clean ValueError, not an allocation of the whole output (6 MB of deflate = 6 GB measured)"""
+    def test_bomb_rejected(self):
+        import zlib, struct, rvtfmt, rvt2text as T
+        c = zlib.compressobj(9, zlib.DEFLATED, -15); body = c.compress(b'\0' * (8 << 20)) + c.flush()
+        stream = b'\0' * 8 + rvtfmt.GZ + b'\0' * 6 + body + struct.pack('<II', 0, 0)
+        old = rvtfmt.MAX_INFLATE; rvtfmt.MAX_INFLATE = 1 << 20
+        try:
+            self.assertRaises(ValueError, rvtfmt.inflate_stream, stream)
+        finally: rvtfmt.MAX_INFLATE = old
+        self.assertEqual(len(rvtfmt.inflate_stream(stream)[1]), 8 << 20)     # under the real cap it is accepted
 if __name__ == '__main__': unittest.main()
