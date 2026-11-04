@@ -108,4 +108,26 @@ class VanishedStream(unittest.TestCase):
         import rvt_scan as R
         R.load(SAMPLE)
 
+
+
+@unittest.skipUnless(SAMPLE, 'sample corpus absent')
+class DirectorySizeCut(unittest.TestCase):
+    """a directory entry whose size was reduced below the real chain cut Global/ElemTable silently (4096 bytes less: 892 -> 430 records); the gzip CRC/ISIZE trailer now rejects it"""
+    def _cut(self, name, delta):
+        import struct, tempfile, olefile
+        o = olefile.OleFileIO(SAMPLE); ss = o.sectorsize
+        s = o.first_dir_sector; chain = []
+        while s < 0xFFFFFFFA and s not in chain: chain.append(s); s = o.fat[s]
+        i = next(k for k, e in enumerate(o.direntries) if e is not None and e.entry_type == 2 and e.name == name)
+        off = (chain[(i * 128) // ss] + 1) * ss + (i * 128) % ss
+        d = bytearray(open(SAMPLE, 'rb').read()); sz = struct.unpack_from('<Q', d, off + 120)[0]
+        struct.pack_into('<Q', d, off + 120, sz - delta)
+        t = tempfile.NamedTemporaryFile(suffix='.rvt'); t.write(d); t.flush(); return t
+    def test_cut_elemtable_rejected(self):
+        import rvt_scan as R
+        t = self._cut('ElemTable', 4096)
+        self.assertRaises(ValueError, R.load, t.name)
+    def test_clean_loads(self):
+        import rvt_scan as R
+        R.load(SAMPLE)
 if __name__ == '__main__': unittest.main()
