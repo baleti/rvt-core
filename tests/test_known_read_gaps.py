@@ -49,7 +49,6 @@ class Truncated(unittest.TestCase):
             with tempfile.NamedTemporaryFile(suffix='.rvt') as t:
                 t.write(raw[:int(len(raw) * frac)]); t.flush()
                 with self.assertRaises(ValueError, msg='truncated to %s accepted' % frac): S.load(t.name)
-if __name__ == '__main__': unittest.main()
 
 
 class Id0Flag(unittest.TestCase):
@@ -59,3 +58,22 @@ class Id0Flag(unittest.TestCase):
         import rvt_entities as E
         r = E.extract(SAMPLE)
         self.assertEqual(r['suspect'], sorted(k for k in r['recs'] if k[0] == 0))
+
+
+@unittest.skipUnless(SAMPLE, 'sample corpus absent')
+class FatChainDamage(unittest.TestCase):
+    """a flipped bit in the directory/FAT used to shorten a stream silently (Partitions 14.8 MB read as ~1 MB, records 1773 -> 65); now a clean ValueError"""
+    def test_shortened_chain_is_rejected(self):
+        import struct, tempfile, olefile, rvt_scan as R
+        d0 = open(SAMPLE, 'rb').read(); o = olefile.OleFileIO(SAMPLE); ss = o.sectorsize; per = ss // 4
+        big = max((e for e in o.direntries if e is not None and e.entry_type == 2), key=lambda e: e.size)
+        chain = [big.isectStart]
+        while len(chain) < 200: chain.append(o.fat[chain[-1]])
+        sec = chain[100]; fatsec = struct.unpack_from('<I', d0, 76 + 4 * (sec // per))[0]
+        d = bytearray(d0); struct.pack_into("<I", d, (fatsec + 1) * ss + 4 * (sec % per), 0xFFFFFFFE)   # end-of-chain after 100 sectors
+        t = tempfile.NamedTemporaryFile(suffix='.rte'); t.write(d); t.flush()
+        self.assertRaises(ValueError, R.check_not_truncated, olefile.OleFileIO(t.name), t.name)
+    def test_clean_file_accepted(self):
+        import olefile, rvt_scan as R
+        R.check_not_truncated(olefile.OleFileIO(SAMPLE), SAMPLE)
+if __name__ == '__main__': unittest.main()
