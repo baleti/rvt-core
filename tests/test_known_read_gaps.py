@@ -90,4 +90,22 @@ class DamagedBasicFileInfo(unittest.TestCase):
         self.assertEqual(P._file_year(t.name), '2024')
         P._YEAR_CACHE.clear(); self.assertEqual(P._file_year(SAMPLE), '2024')
 
+
+@unittest.skipUnless(SAMPLE, 'sample corpus absent')
+class VanishedStream(unittest.TestCase):
+    """a bit flip in a directory entry NAME makes the stream vanish; load() used to carry on without it"""
+    def test_renamed_required_stream_is_rejected(self):
+        import struct, tempfile, olefile, rvt_scan as R
+        d0 = open(SAMPLE, 'rb').read(); o = olefile.OleFileIO(SAMPLE); ss = o.sectorsize
+        chain = []; s = struct.unpack_from('<I', d0, 48)[0]
+        while s < 0xFFFFFFFA: chain.append(s); s = o.fat[s]
+        sid = [i for i, e in enumerate(o.direntries) if e is not None and e.name == 'Latest' and o.direntries[e.sid_parent if hasattr(e, 'sid_parent') else 0] is not None][-1]
+        per = ss // 128; off = (chain[sid // per] + 1) * ss + (sid % per) * 128
+        d = bytearray(d0); d[off] ^= 1
+        t = tempfile.NamedTemporaryFile(suffix='.rte'); t.write(d); t.flush()
+        self.assertRaises(ValueError, R.load, t.name)
+    def test_clean_file_loads(self):
+        import rvt_scan as R
+        R.load(SAMPLE)
+
 if __name__ == '__main__': unittest.main()
