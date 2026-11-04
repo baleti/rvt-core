@@ -76,4 +76,18 @@ class FatChainDamage(unittest.TestCase):
     def test_clean_file_accepted(self):
         import olefile, rvt_scan as R
         R.check_not_truncated(olefile.OleFileIO(SAMPLE), SAMPLE)
+
+
+@unittest.skipUnless(SAMPLE, 'sample corpus absent')
+class DamagedBasicFileInfo(unittest.TestCase):
+    """the Revit year that selects decode tables comes from BasicFileInfo; a flipped year digit must not win over the Formats/Latest schema"""
+    def test_flipped_year_digit_is_overruled(self):
+        import tempfile, rvt_params as P
+        P._YEAR_CACHE.clear()
+        d = bytearray(open(SAMPLE, 'rb').read()); i = d.find('2024'.encode('utf-16le')); self.assertGreater(i, 0)
+        d[i + 6] = ord('5')
+        t = tempfile.NamedTemporaryFile(suffix='.rte'); t.write(d); t.flush()
+        self.assertEqual(P._file_year(t.name), '2024')
+        P._YEAR_CACHE.clear(); self.assertEqual(P._file_year(SAMPLE), '2024')
+
 if __name__ == '__main__': unittest.main()
