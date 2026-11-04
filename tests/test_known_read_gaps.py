@@ -127,6 +127,12 @@ class DirectorySizeCut(unittest.TestCase):
         import rvt_scan as R
         t = self._cut('ElemTable', 4096)
         self.assertRaises(ValueError, R.load, t.name)
+    def test_cut_partition_rejected(self):
+        import rvt_scan as R, olefile
+        o = olefile.OleFileIO(SAMPLE)
+        big = max((e for e in o.direntries if e is not None and e.entry_type == 2 and e.name.isdigit()), key=lambda e: e.size)
+        t = self._cut(big.name, big.size // 3)
+        self.assertRaises(ValueError, R.load, t.name)
     def test_clean_loads(self):
         import rvt_scan as R
         R.load(SAMPLE)
