@@ -144,6 +144,11 @@ class DirectorySizeCut(unittest.TestCase):
         t = tempfile.NamedTemporaryFile(suffix='.rvt'); t.write(d); t.flush()
         self.assertRaises(ValueError, R.check_fat_consistent, olefile.OleFileIO(t.name))     # load() may reject it earlier for other reasons; the FAT check alone must see it
         R.check_fat_consistent(olefile.OleFileIO(SAMPLE))
+    def test_minifat_header_damage_rejected(self):
+        import tempfile, olefile, rvt_scan as R
+        d = bytearray(open(SAMPLE, 'rb').read()); d[63] ^= 0x04       # high byte of the first MiniFAT sector (measured silent: 5 small streams changed)
+        t = tempfile.NamedTemporaryFile(suffix='.rvt'); t.write(d); t.flush()
+        self.assertRaises(ValueError, R.check_fat_consistent, olefile.OleFileIO(t.name))
     def test_clean_loads(self):
         import rvt_scan as R
         R.load(SAMPLE)
