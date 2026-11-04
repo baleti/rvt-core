@@ -48,6 +48,8 @@ def stream_inventory(p):
                 st = 'decoded'
             elif n == 'BasicFileInfo':
                 st = 'decoded'
+            elif n == 'PartAtom' and raw.lstrip(b'\xef\xbb\xbf')[:5] == b'<?xml':
+                import xml.dom.minidom as M; M.parseString(raw.lstrip(b'\xef\xbb\xbf')); st = 'opaque'  # plain Atom XML in .rfa, well-formed
             elif raw[:2] == b'PK':
                 import zipfile, io
                 bad = zipfile.ZipFile(io.BytesIO(raw)).testzip()
