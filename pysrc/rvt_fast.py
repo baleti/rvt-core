@@ -98,9 +98,11 @@ class _nogc:
 def _unpack(fn, eid_t):
     with _nogc(): return _rc().unpack(fn, eid_t)
 
+_ORACLE_ONLY = False      # set while a failed native extract is redone by the Python oracle (on() False => the oracle's hooks do not re-enter rvt_fast)
 def on():
     """True when the Rust paths apply (extension present, RVT_NOFAST unset, decoder in its default configuration). Hooks in the oracle call
     rvt_fast only when on() is True, and rvt_fast calls the oracle only when it is False: no recursion."""
+    if _ORACLE_ONLY: return False
     try: return _rc() is not None and not os.environ.get('RVT_OLDCAND') and _decoder_default_config()
     except Exception: return False
 
@@ -143,7 +145,16 @@ def extract(path, extra=(), only_ids=None, want_all=False, slim=None):
     """== rvt_entities.extract (same arguments, same result)"""
     import rvt_entities as E
     if not on(): return E.extract(path, extra=extra, only_ids=only_ids, want_all=want_all, slim=slim)
-    return _extract(path, extra, only_ids, want_all, slim)
+    try: return _extract(path, extra, only_ids, want_all, slim)
+    except MemoryError: raise
+    except BaseException as e:
+        # a native failure mid-extract (pyo3 PanicException is a BaseException, or a RuntimeError from the Rust side) must not lose the read: the Python oracle gives the same result
+        if isinstance(e, (KeyboardInterrupt, SystemExit, GeneratorExit)): raise
+        sys.stderr.write('rvt_fast: native extract failed (%s: %s), using the Python decoder\n' % (type(e).__name__, str(e)[:120]))
+        global _ORACLE_ONLY
+        _ORACLE_ONLY = True
+        try: return E.extract(path, extra=extra, only_ids=only_ids, want_all=want_all, slim=slim)
+        finally: _ORACLE_ONLY = False
 
 _SHARED = {}
 def extract_shared(path):
