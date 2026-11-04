@@ -130,4 +130,15 @@ class DirectorySizeCut(unittest.TestCase):
     def test_clean_loads(self):
         import rvt_scan as R
         R.load(SAMPLE)
+    def test_duplicate_or_renamed_stream_rejected(self):
+        import struct, tempfile, olefile, rvt_scan as R
+        o = olefile.OleFileIO(SAMPLE); ss = o.sectorsize
+        s = o.first_dir_sector; chain = []
+        while s < 0xFFFFFFFA and s not in chain: chain.append(s); s = o.fat[s]
+        ents = [k for k, e in enumerate(o.direntries) if e is not None and e.entry_type == 2]
+        off = lambda i: (chain[(i * 128) // ss] + 1) * ss + (i * 128) % ss
+        for a, b in ((ents[0], ents[1]), (ents[2], ents[3])):      # entry b takes the name of entry a
+            d = bytearray(open(SAMPLE, 'rb').read()); d[off(b):off(b) + 66] = d[off(a):off(a) + 66]
+            t = tempfile.NamedTemporaryFile(suffix='.rvt'); t.write(d); t.flush()
+            self.assertRaises(ValueError, R.load, t.name)
 if __name__ == '__main__': unittest.main()
