@@ -30,4 +30,15 @@ class Hostile(unittest.TestCase):
         for _ in range(3): d[random.randrange(len(d) // 3, len(d) * 2 // 3)] ^= 0xff
         o.write_stream('Global/ElemTable', bytes(d)); o.close()
         self.assertIn('CRC', str(run(f).get('streams')))
+    def _elem(self, fn):
+        import olefile
+        f = self.mk(open(SRC, 'rb').read()); o = olefile.OleFileIO(f, write_mode=True)
+        d = o.openstream('Global/ElemTable').read(); nd = fn(bytearray(d)); assert len(nd) == len(d)
+        o.write_stream('Global/ElemTable', bytes(nd)); o.close(); return run(f)
+    def test_elemtable_header_zeroed(self):
+        r = self._elem(lambda d: (d.__setitem__(slice(0, 64), bytes(64)), d)[1])
+        self.assertNotEqual((r['open'], str(r.get('streams', {}).get('Global/ElemTable'))), ('ok', "[%s, 'decoded']" % r.get('streams', {}).get('Global/ElemTable', [0])[0]))
+    def test_elemtable_all_zero(self):
+        r = self._elem(lambda d: bytearray(len(d)))
+        self.assertNotIn('decoded', str(r.get('streams', {}).get('Global/ElemTable')))
 if __name__ == '__main__': unittest.main()
