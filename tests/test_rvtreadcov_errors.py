@@ -41,4 +41,15 @@ class Hostile(unittest.TestCase):
     def test_elemtable_all_zero(self):
         r = self._elem(lambda d: bytearray(len(d)))
         self.assertNotIn('decoded', str(r.get('streams', {}).get('Global/ElemTable')))
+    def test_partitiontable_damaged(self):
+        import olefile
+        for mode in ('zero', 'flip'):
+            f = self.mk(open(SRC, 'rb').read()); o = olefile.OleFileIO(f, write_mode=True)
+            d = bytearray(o.openstream('Global/PartitionTable').read())
+            if mode == 'zero': d = bytearray(len(d))
+            else:
+                for i in range(len(d)): d[i] ^= 0xff
+            o.write_stream('Global/PartitionTable', bytes(d)); o.close()
+            r = run(f)   # must be a clear error or must not claim 'ok' with a decoded PartitionTable
+            self.assertTrue(r['open'] != 'ok' or 'decoded' not in str(r.get('streams', {}).get('Global/PartitionTable')), (mode, r['open']))
 if __name__ == '__main__': unittest.main()
