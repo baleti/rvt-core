@@ -177,3 +177,18 @@ class InflateBomb(unittest.TestCase):
         finally: rvtfmt.MAX_INFLATE = old
         self.assertEqual(len(rvtfmt.inflate_stream(stream)[1]), 8 << 20)     # under the real cap it is accepted
 if __name__ == '__main__': unittest.main()
+
+
+@unittest.skipUnless(SAMPLE, 'sample corpus absent')
+class CfbHeaderFlip(unittest.TestCase):
+    """CFB header structural fields (signature, sector shift, FAT/dir/MiniFAT start+counts, DIFAT count) flipped one byte at a time must be a clean error, never a crash or silent load.
+    Fields the reader tolerates (CLSID, versions, byte order, minicutoff...) are pinned by the Revit VM verdict, not here (read-write gap)."""
+    STRUCT = list(range(0, 8)) + [30, 31] + list(range(44, 52)) + list(range(60, 68)) + list(range(72, 76))
+    def test_structural_flips_are_clean_errors(self):
+        import tempfile, rvt_scan as R
+        src = open(SAMPLE, 'rb').read(); t = tempfile.NamedTemporaryFile(suffix='.rte'); bad = []
+        for off in self.STRUCT:
+            b = bytearray(src); b[off] ^= 0xFF; t.seek(0); t.truncate(); t.write(b); t.flush()
+            try: R.load(t.name); bad.append(off)
+            except (ValueError, OSError, EOFError, KeyError, IndexError): pass
+        self.assertEqual(bad, [], 'structural header flip loaded silently')
