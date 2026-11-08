@@ -67,6 +67,20 @@ def check_members(raw):
         if len(tr) < 8: raise ValueError('member %d at %d: gzip trailer cut short (%d of 8 bytes; stream size or chain damaged)' % (n, i, len(tr)))
         if struct.unpack('<II', tr) != (zlib.crc32(out) & 0xffffffff, len(out) & 0xffffffff): raise ValueError('member %d at %d: CRC/ISIZE mismatch' % (n, i))
         n += 1; pos = len(data) - len(d.unused_data) + 8
+def member_diff(a, b):
+    """compare two paged streams member by member: (compressed_differ, plain_differ, count). Untouched members of a saved file must be compressed-byte identical (Revit's deflate cannot be re-created by zlib: 0/1579 members)"""
+    import zlib
+    from rvtfmt import strip_pages, GZ
+    def mem(raw):
+        d = strip_pages(raw); pos = 0; L = []
+        while True:
+            i = d.find(GZ, pos)
+            if i < 0: return L
+            x = zlib.decompressobj(-15); o = x.decompress(d[i + 10:]); cl = len(d) - i - 10 - len(x.unused_data)
+            L.append((d[i + 10:i + 10 + cl], o)); pos = i + 10 + cl + 8
+    ma, mb = mem(a), mem(b)
+    if len(ma) != len(mb): raise ValueError('member count %d != %d' % (len(ma), len(mb)))
+    return sum(x[0] != y[0] for x, y in zip(ma, mb)), sum(x[1] != y[1] for x, y in zip(ma, mb)), len(ma)
 def stream_inventory(p):
     import olefile
     from rvtfmt import inflate_stream
