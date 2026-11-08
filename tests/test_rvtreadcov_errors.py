@@ -75,6 +75,22 @@ class DirEntryFlip(unittest.TestCase):
             f = tempfile.NamedTemporaryFile(suffix='.rvt', delete=False); f.write(x); f.close(); self.addCleanup(os.unlink, f.name)
             self.assertIn('missing core stream', run(f.name)['open'], nm); hit += 1
         self.assertEqual(hit, 3)
+@unittest.skipUnless(SRC, 'sample corpus absent')
+class FatFlip(unittest.TestCase):
+    def test_chain_pointer_flip_in_partition(self):
+        import olefile, struct
+        b = open(SRC, 'rb').read(); o = olefile.OleFileIO(SRC); ss = 1 << struct.unpack_from('<H', b, 30)[0]
+        per = ss // 4
+        ent = max((o.direntries[o._find(n)] for n in ['/'.join(e) for e in o.listdir(streams=True, storages=False) if e[0] == 'Partitions']), key=lambda d: d.size)
+        chain = []; s = ent.isectStart
+        while s < 0xfffffffa: chain.append(s); s = o.fat[s]
+        refused = 0
+        for k in (len(chain) // 5, len(chain) // 2, len(chain) * 4 // 5):
+            fs = struct.unpack_from('<I', b, 76 + 4 * (chain[k] // per))[0]      # FAT sector holding this entry (header DIFAT, first 109)
+            x = bytearray(b); x[(fs + 1) * ss + 4 * (chain[k] % per)] ^= 1      # next-sector pointer off by one: a cut-off deflate stream used to inflate without error and skip the CRC check
+            f = tempfile.NamedTemporaryFile(suffix='.rvt', delete=False); f.write(x); f.close(); self.addCleanup(os.unlink, f.name)
+            r = run(f.name); refused += r['open'] != 'ok' or any(str(v[1]).startswith('error') for v in r['streams'].values())
+        self.assertEqual(refused, 3)
 class ElemDups(unittest.TestCase):
     def tbl(self, ids, rw=28):
         import struct
