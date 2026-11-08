@@ -45,8 +45,9 @@ def check_members(raw):
         except zlib.error as x: raise ValueError('member %d at %d: zlib %s' % (n, i, x))
         if not d.eof: raise ValueError('member %d at %d: deflate stream never terminates (chain damaged)' % (n, i))   # decompressobj returns without error on a cut-off stream; the trailer check below was skipped
         tr = d.unused_data[:8]
-        if len(tr) == 8 and (struct.unpack('<II', tr) != (zlib.crc32(out) & 0xffffffff, len(out) & 0xffffffff)): raise ValueError('member %d at %d: CRC/ISIZE mismatch' % (n, i))
-        n += 1; pos = len(data) - len(d.unused_data) + (8 if len(tr) == 8 else 0)
+        if len(tr) < 8: raise ValueError('member %d at %d: gzip trailer cut short (%d of 8 bytes; stream size or chain damaged)' % (n, i, len(tr)))
+        if struct.unpack('<II', tr) != (zlib.crc32(out) & 0xffffffff, len(out) & 0xffffffff): raise ValueError('member %d at %d: CRC/ISIZE mismatch' % (n, i))
+        n += 1; pos = len(data) - len(d.unused_data) + 8
 def stream_inventory(p):
     import olefile
     from rvtfmt import inflate_stream
