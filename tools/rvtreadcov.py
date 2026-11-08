@@ -55,7 +55,7 @@ def check_members(raw):
     """every gzip member of a paged stream must inflate and match its CRC32/ISIZE trailer (rvt2text.segments skips bad members silently)"""
     import zlib, struct
     from rvtfmt import strip_pages, GZ
-    data = strip_pages(raw); pos = n = prev_end = 0
+    data = strip_pages(raw); pos = n = prev_end = prev_i = 0; tag = None
     while True:
         i = data.find(GZ, pos)
         if i < 0: return n
@@ -70,8 +70,11 @@ def check_members(raw):
         if n and i - prev_end >= 16:
             # the record between two members ends with [.., u32 = this member's gzip length + 8, .., 101, 0]: 100% of ~12000 gaps in 12 files 2017-2026 (a flip there silently re-points the member chain)
             g = data[prev_end:i]
+            if struct.unpack_from('<I', g, 2)[0] != (prev_end - prev_i) + 8: raise ValueError('member %d at %d: inter-member record does not carry the previous member length (chain record damaged)' % (n, i))   # 100% of ~5000 sampled gaps, 2017-2026
+            if tag is None: tag = g[:2]
+            elif g[:2] != tag: raise ValueError('member %d at %d: inter-member record tag differs from the stream\'s other records' % (n, i))   # constant within a stream in all sampled files
             if struct.unpack_from('<I', g, len(g) - 16)[0] != (end - i) + 8: raise ValueError('member %d at %d: inter-member record length field does not match the member (chain record damaged)' % (n, i))
-        prev_end = end; n += 1; pos = end
+        prev_i = i; prev_end = end; n += 1; pos = end
 def member_diff(a, b):
     """compare two paged streams member by member: (compressed_differ, plain_differ, count). Untouched members of a saved file must be compressed-byte identical (Revit's deflate cannot be re-created by zlib: 0/1579 members)"""
     import zlib

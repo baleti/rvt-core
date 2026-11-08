@@ -16,3 +16,16 @@ class Gap(unittest.TestCase):
         x = bytearray(raw); x[e + 16] ^= 0x04
         with self.assertRaises(ValueError): R.check_members(bytes(x))
 if __name__ == '__main__': unittest.main()
+class Gap2(unittest.TestCase):
+    def _raw(self):
+        raw = olefile.OleFileIO(SRC).openstream('Partitions/59').read(); data = strip_pages(raw)
+        i = data.find(GZ); d = zlib.decompressobj(-15); d.decompress(memoryview(data)[i + 10:]); e = len(data) - len(d.unused_data) + 8
+        return raw, e
+    def test_prev_length_flip(self):
+        raw, e = self._raw(); x = bytearray(raw); x[e + 2] ^= 0x08
+        with self.assertRaises(ValueError): R.check_members(bytes(x))
+    def test_tag_flip(self):
+        raw, e = self._raw(); x = bytearray(raw); x[e] ^= 0x01
+        with self.assertRaises(ValueError): R.check_members(bytes(x))
+    def test_clean(self):
+        raw, e = self._raw(); self.assertGreater(R.check_members(raw), 3)
