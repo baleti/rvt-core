@@ -23,6 +23,25 @@ def minifat_header_bad(o):
     while s < 0xfffffffa and s not in seen and s < len(o.fat): seen.add(s); s = o.fat[s]
     if len(seen) > n: return 'mini-FAT chain has %d sectors but the header declares %d' % (len(seen), n)
     return None
+def dirtree_bad(o):
+    """CFB directory tree from the raw directory sectors: every in-use entry must be reachable exactly once from the root via child/left/right, no cycles (a flipped sibling/child pointer silently hides or duplicates a stream; olefile only loads reachable entries so it cannot see this)"""
+    import struct
+    ss = o.sectorsize; fp = o.fp; ents = []; s = o.first_dir_sector; seen_s = set()
+    while s < 0xfffffffa and s not in seen_s and s < len(o.fat):
+        seen_s.add(s); fp.seek((s + 1) * ss); b = fp.read(ss)
+        for k in range(len(b) // 128):
+            e = b[k * 128:(k + 1) * 128]
+            if len(e) == 128: ents.append((e[66], struct.unpack_from('<III', e, 68)))    # type, (left, right, child)
+        s = o.fat[s]
+    seen = set(); st = [0] if ents else []
+    while st:
+        i = st.pop()
+        if i >= len(ents): return 'directory pointer %d beyond the %d entries' % (i, len(ents))
+        if i in seen: return 'directory entry %d reached twice (cycle or shared sibling)' % i
+        seen.add(i); st += [x for x in ents[i][1] if x != 0xffffffff]
+    used = {i for i, (t, _) in enumerate(ents) if t != 0}
+    if used - seen: return 'directory entries %s in use but unreachable from the root' % sorted(used - seen)[:5]
+    return None
 def elemtable_dups(a):
     """ids repeated in a decompressed Global/ElemTable (header 6 bytes, count at 2, rows of 28 or 40 bytes, id first); None if layout unrecognised"""
     import struct
@@ -57,6 +76,8 @@ def stream_inventory(p):
     if _hv: raise ValueError('CFB header violates ' + ','.join(_hv))
     o = olefile.OleFileIO(p)
     if truncated(o, p): raise ValueError('file truncated: directory needs more sectors than the file holds')
+    _t = dirtree_bad(o)
+    if _t: raise ValueError('CFB directory: ' + _t)
     _m = minifat_header_bad(o)
     if _m: raise ValueError('CFB header: ' + _m)
     for e in o.listdir(streams=True, storages=False):
