@@ -47,7 +47,7 @@ def elemtable_dups(a):
     import struct
     if len(a) < 6: return None
     n = struct.unpack_from('<I', a, 2)[0]
-    RW, W = next(((rw, w) for rw, w in ((28, 4), (40, 8)) if 0 <= len(a) - 6 - rw * n < 64), (28, 4) if 0 <= len(a) - 6 - 28 * n else (None, None))
+    RW, W = next(((rw, w) for rw, w in ((28, 4), (40, 8)) if 0 <= len(a) - 6 - rw * n < 64), (None, None))   # no loose 28-byte fallback: 2024-2026 RFA ElemTables (40-byte rows + 600 B tail) read as 1.5k bogus duplicates and genuine Autodesk samples were refused
     if RW is None: return None
     ids = [int.from_bytes(a[6 + RW * q:6 + RW * q + W], 'little') for q in range(n)]
     return len(ids) - len(set(ids))
@@ -96,7 +96,8 @@ def stream_inventory(p):
             elif n == 'BasicFileInfo':
                 _t = ''.join(raw[a:].decode('utf-16le', 'ignore') for a in (0, 1))     # UTF-16 text starts at an odd or even byte
                 _m = [l for l in ('Worksharing:', 'Central Model Path:', 'Build:', 'Username:', 'Open Workset Default:') if l not in _t]   # present in 1115 of 1115 local files, 2017-2026
-                if _m: raise ValueError('BasicFileInfo lacks label %s (mini-stream damage?)' % _m[0])
+                _y = re.search(r'Revit[^\n]*?(20\d\d)', _t)
+                if _m and not (_y and int(_y.group(1)) < 2016): raise ValueError('BasicFileInfo lacks label %s (mini-stream damage?)' % _m[0])   # pre-2016 files (outside the 1115 local 2016+ files the rule was calibrated on) legitimately lack some labels
                 st = 'decoded'
             elif n == 'PartAtom' and raw.lstrip(b'\xef\xbb\xbf')[:5] == b'<?xml':
                 import xml.dom.minidom as M, xml.parsers.expat as X
