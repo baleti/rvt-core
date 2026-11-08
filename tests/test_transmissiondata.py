@@ -27,3 +27,13 @@ class Contents(TD):
         self.assertEqual(R.stream_inventory(self._flipc(lambda r: None))['Contents'][1], 'opaque')
     def test_contents_magic_flip(self):
         self.assertTrue(R.stream_inventory(self._flipc(lambda r: r.__setitem__(1, r[1] ^ 1)))['Contents'][1].startswith('error'))
+class Preview(unittest.TestCase):
+    def _mod(self, f):
+        d = tempfile.mkdtemp(); p = os.path.join(d, 't.rte'); shutil.copy(SRC, p)
+        o = olefile.OleFileIO(p, write_mode=True); raw = bytearray(o.openstream('RevitPreview4.0').read()); f(raw)
+        o.write_stream('RevitPreview4.0', bytes(raw)); o.close(); return p
+    def test_clean(self):
+        self.assertEqual(R.stream_inventory(self._mod(lambda r: None))['RevitPreview4.0'][1], 'opaque')
+    def test_png_body_flip(self):
+        def f(r): i = r.find(b'IDAT') + 8; r[i] ^= 0x55
+        self.assertTrue(R.stream_inventory(self._mod(f))['RevitPreview4.0'][1].startswith('error'))
