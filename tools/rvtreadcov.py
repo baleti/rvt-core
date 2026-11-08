@@ -124,6 +124,12 @@ def stream_inventory(p):
                 import zipfile, io
                 bad = zipfile.ZipFile(io.BytesIO(raw)).testzip()
                 st = 'opaque' if bad is None else 'error:zip member ' + str(bad)[:20]
+            elif n == 'TransmissionData':
+                # u32 char count + UTF-16LE XML; 78 of 78 corpus files satisfy len == 4 + 2*count and start with <?xml
+                import struct as _s
+                if len(raw) < 6 or len(raw) != 4 + 2 * _s.unpack_from('<I', raw)[0]: raise ValueError('TransmissionData length prefix does not match the stream size')
+                if not raw[4:].decode('utf-16-le').lstrip().startswith('<?xml'): raise ValueError('TransmissionData is not XML')
+                st = 'opaque'
             elif n.startswith('\x05') or n.startswith('TransmissionData') or n.startswith('RevitPreview') or n == 'Contents':
                 st = 'opaque'
             else:
