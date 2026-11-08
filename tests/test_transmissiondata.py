@@ -18,6 +18,11 @@ class TD(unittest.TestCase):
         p = self._flip(lambda r: r.__setitem__(4, 0x41))
         self.assertTrue(R.stream_inventory(p)['TransmissionData'][1].startswith('error'))
 if __name__ == '__main__': unittest.main()
+class TDxml(TD):
+    def test_tag_flip_same_length(self):
+        def f(r):
+            i = r.find(b'<\x00/\x00', 40); r[i] = ord('X')    # '</' -> 'X/' keeps the length, breaks well-formedness
+        p = self._flip(f); self.assertTrue(R.stream_inventory(p)['TransmissionData'][1].startswith('error'))
 class Contents(TD):
     def _flipc(self, f):
         d = tempfile.mkdtemp(); p = os.path.join(d, 't.rte'); shutil.copy(SRC, p)
