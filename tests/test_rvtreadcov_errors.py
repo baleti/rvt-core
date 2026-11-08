@@ -104,6 +104,17 @@ class MiniFatFlip(unittest.TestCase):
             f = tempfile.NamedTemporaryFile(suffix='.rvt', delete=False); f.write(x); f.close(); self.addCleanup(os.unlink, f.name)
             r = run(f.name); caught += str(r['streams']['BasicFileInfo'][1]).startswith('error')
         self.assertGreaterEqual(caught, 3)
+@unittest.skipUnless(SRC, 'sample corpus absent')
+class HeaderSweep(unittest.TestCase):
+    def test_every_header_field_flip_is_an_error(self):
+        sys.path.insert(0, os.path.join(HERE, '..', 'tools')); import cfbhdr
+        b = open(SRC, 'rb').read(); self.assertEqual(cfbhdr.violations(b[:512]), [])
+        # (40 numDirSectors is free in v4 and 88 is a used DIFAT slot here: not structurally checkable) one flip per header field: 0xff xor on the first byte of CLSID, versions, byte order, shifts, reserved, dir sectors, FAT count, signature-free: tx(52) is unconstrained by the spec and stays accepted
+        missed = [o for o in (8, 24, 26, 28, 30, 32, 34, 36, 44, 56, 68, 200, 400) if not cfbhdr.violations(bytes(b[:o]) + bytes([b[o] ^ 0xff]) + bytes(b[o + 1:512]))]
+        self.assertEqual(missed, [])
+        for o in (8, 34, 44):      # through the tool: read-ok before cfbhdr
+            f = tempfile.NamedTemporaryFile(suffix='.rvt', delete=False); f.write(bytes(b[:o]) + bytes([b[o] ^ 0xff]) + bytes(b[o + 1:])); f.close(); self.addCleanup(os.unlink, f.name)
+            self.assertIn('CFB header', run(f.name)['open'], o)
 class ElemDups(unittest.TestCase):
     def tbl(self, ids, rw=28):
         import struct

@@ -5,7 +5,7 @@ Fields: sha8, size, year (BasicFileInfo), streams {name: [stored_bytes, status]}
   'decoded' (a semantic decoder exists and ran), 'opaque' (inflates fine, no semantic decoder), 'error:<msg>',
 and with --records the per-class record decode counts from rvt-research cov_year.py (ok/total)."""
 import sys, os, json, hashlib, re, subprocess, time
-RR = os.path.expanduser('~/rvt-research'); sys.path.insert(0, RR)
+RR = os.path.expanduser('~/rvt-research'); sys.path.insert(0, RR); sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 DECODED = re.compile(r'^(Formats/Latest|Global/ElemTable|Partitions/\d+|BasicFileInfo|Global/PartitionTable|Global/Latest|Global/History|Global/ContentDocuments)$')
 CORE = ('BasicFileInfo', 'Formats/Latest', 'Global/Latest', 'Global/ElemTable', 'Global/PartitionTable', 'Global/History', 'Partitions/N')
 def truncated(o, p):
@@ -51,6 +51,9 @@ def stream_inventory(p):
     import olefile
     from rvtfmt import inflate_stream
     out = {}
+    import cfbhdr
+    _hv = cfbhdr.violations(open(p, 'rb').read(512))     # strict [MS-CFB] header rules: 0 violations in 12558 local rvt/rte/rfa; stricter than Revit 2024, which still opens flips at 28, 29, 36, 40
+    if _hv: raise ValueError('CFB header violates ' + ','.join(_hv))
     o = olefile.OleFileIO(p)
     if truncated(o, p): raise ValueError('file truncated: directory needs more sectors than the file holds')
     _m = minifat_header_bad(o)
