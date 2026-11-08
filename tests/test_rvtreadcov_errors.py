@@ -52,6 +52,14 @@ class Hostile(unittest.TestCase):
             o.write_stream('Global/PartitionTable', bytes(d)); o.close()
             r = run(f)   # must be a clear error or must not claim 'ok' with a decoded PartitionTable
             self.assertTrue(r['open'] != 'ok' or 'decoded' not in str(r.get('streams', {}).get('Global/PartitionTable')), (mode, r['open']))
+@unittest.skipUnless(SRC, 'sample corpus absent')
+class HeaderFlip(unittest.TestCase):
+    def flip(self, off, val):
+        d = bytearray(open(SRC, 'rb').read()); d[off:off + len(val)] = val
+        f = tempfile.NamedTemporaryFile(suffix='.rvt', delete=False); f.write(d); f.close(); self.addCleanup(os.unlink, f.name); return run(f.name)
+    def test_first_minifat_wrong_chain(self): self.assertIn('mini-FAT', self.flip(60, bytes([0xfd])).get('open', ''))   # Revit 2024 refuses
+    def test_minifat_count_absurd(self): self.assertIn('mini-FAT', self.flip(66, bytes([0xff])).get('open', ''))     # Revit 2024 refuses
+    def test_minifat_count_larger_opens(self): self.assertEqual(self.flip(64, bytes([0xfe]))['open'], 'ok')           # Revit 2024 opens
 class ElemDups(unittest.TestCase):
     def tbl(self, ids, rw=28):
         import struct

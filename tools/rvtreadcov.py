@@ -13,6 +13,15 @@ def truncated(o, p):
     for e in o.direntries:
         if e is not None and e.entry_type == 2 and e.size >= o.minisectorcutoff: need += -(-e.size // ss)
     return os.path.getsize(p) < need * ss
+def minifat_header_bad(o):
+    """CFB header mini-FAT fields (offsets 60/64) vs the FAT: Revit 2024 refuses a start sector whose chain is longer than the declared count (c5x header flips 60) and a count larger than the FAT (66); a count above the real chain length alone opens (64), so it is not flagged. Returns a message or None."""
+    n = o.num_mini_fat_sectors
+    if n == 0 or o.first_mini_fat_sector >= 0xfffffffa: return None
+    if n > len(o.fat): return 'mini-FAT sector count %d exceeds the FAT (%d)' % (n, len(o.fat))
+    s = o.first_mini_fat_sector; seen = set()
+    while s < 0xfffffffa and s not in seen and s < len(o.fat): seen.add(s); s = o.fat[s]
+    if len(seen) > n: return 'mini-FAT chain has %d sectors but the header declares %d' % (len(seen), n)
+    return None
 def elemtable_dups(a):
     """ids repeated in a decompressed Global/ElemTable (header 6 bytes, count at 2, rows of 28 or 40 bytes, id first); None if layout unrecognised"""
     import struct
@@ -42,6 +51,8 @@ def stream_inventory(p):
     out = {}
     o = olefile.OleFileIO(p)
     if truncated(o, p): raise ValueError('file truncated: directory needs more sectors than the file holds')
+    _m = minifat_header_bad(o)
+    if _m: raise ValueError('CFB header: ' + _m)
     for e in o.listdir(streams=True, storages=False):
         n = '/'.join(e)
         try:
