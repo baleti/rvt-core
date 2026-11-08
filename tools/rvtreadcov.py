@@ -49,7 +49,12 @@ def stream_inventory(p):
             elif n == 'BasicFileInfo':
                 st = 'decoded'
             elif n == 'PartAtom' and raw.lstrip(b'\xef\xbb\xbf')[:5] == b'<?xml':
-                import xml.dom.minidom as M; M.parseString(raw.lstrip(b'\xef\xbb\xbf')); st = 'opaque'  # plain Atom XML in .rfa, well-formed
+                import xml.dom.minidom as M, xml.parsers.expat as X
+                try: M.parseString(raw.lstrip(b'\xef\xbb\xbf')); st = 'opaque'  # plain Atom XML in .rfa, well-formed
+                except X.ExpatError:
+                    # Revit itself writes an unescaped '&' from the family name into the title: upstream quirk, not damage. Accept only if escaping bare '&' makes it well-formed
+                    fixed = re.sub(rb'&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)', b'&amp;', raw.lstrip(b'\xef\xbb\xbf'))
+                    M.parseString(fixed); st = 'opaque'
             elif raw[:2] == b'PK':
                 import zipfile, io
                 bad = zipfile.ZipFile(io.BytesIO(raw)).testzip()
