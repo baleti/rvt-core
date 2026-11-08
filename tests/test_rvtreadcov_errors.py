@@ -115,6 +115,20 @@ class HeaderSweep(unittest.TestCase):
         for o in (8, 34, 44):      # through the tool: read-ok before cfbhdr
             f = tempfile.NamedTemporaryFile(suffix='.rvt', delete=False); f.write(bytes(b[:o]) + bytes([b[o] ^ 0xff]) + bytes(b[o + 1:])); f.close(); self.addCleanup(os.unlink, f.name)
             self.assertIn('CFB header', run(f.name)['open'], o)
+@unittest.skipUnless(SRC, 'sample corpus absent')
+class StreamRename(unittest.TestCase):
+    def test_renamed_stream_entry_is_an_error(self):
+        import struct
+        b = open(SRC, 'rb').read(); ds = struct.unpack_from('<I', b, 48)[0]; base = (ds + 1) * (1 << struct.unpack_from('<H', b, 30)[0]); hit = 0
+        for e in range(1, 40):
+            r = b[base + 128 * e:base + 128 * e + 128]
+            if len(r) < 128 or r[66] != 2: continue
+            nm = r[:64].decode('utf-16le', 'ignore').split('\0')[0]
+            if nm not in ('ProjectInformation', 'DocumentIncrementTable', 'ContentDocuments', 'TransmissionData', 'Contents'): continue
+            x = bytearray(b); x[base + 128 * e] ^= 0xff     # first name byte: the stream silently disappears from the inventory
+            f = tempfile.NamedTemporaryFile(suffix='.rvt', delete=False); f.write(x); f.close(); self.addCleanup(os.unlink, f.name)
+            self.assertIn('missing core stream', run(f.name)['open'], nm); hit += 1
+        self.assertEqual(hit, 5)
 class ElemDups(unittest.TestCase):
     def tbl(self, ids, rw=28):
         import struct

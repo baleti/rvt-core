@@ -7,7 +7,7 @@ and with --records the per-class record decode counts from rvt-research cov_year
 import sys, os, json, hashlib, re, subprocess, time
 RR = os.path.expanduser('~/rvt-research'); sys.path.insert(0, RR); sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 DECODED = re.compile(r'^(Formats/Latest|Global/ElemTable|Partitions/\d+|BasicFileInfo|Global/PartitionTable|Global/Latest|Global/History|Global/ContentDocuments)$')
-CORE = ('BasicFileInfo', 'Formats/Latest', 'Global/Latest', 'Global/ElemTable', 'Global/PartitionTable', 'Global/History', 'Partitions/N')
+CORE = ('BasicFileInfo', 'Formats/Latest', 'Global/Latest', 'Global/ElemTable', 'Global/PartitionTable', 'Global/History', 'Partitions/N', 'ProjectInformation', 'TransmissionData', 'Contents', 'Global/ContentDocuments', 'Global/DocumentIncrementTable')
 def truncated(o, p):
     """olefile pads a truncated file with zeros instead of failing: the sectors the directory says exist must fit in the file"""
     ss = o.sectorsize; need = 1 + -(-o.root.size // ss)
