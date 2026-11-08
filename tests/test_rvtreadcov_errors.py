@@ -52,4 +52,13 @@ class Hostile(unittest.TestCase):
             o.write_stream('Global/PartitionTable', bytes(d)); o.close()
             r = run(f)   # must be a clear error or must not claim 'ok' with a decoded PartitionTable
             self.assertTrue(r['open'] != 'ok' or 'decoded' not in str(r.get('streams', {}).get('Global/PartitionTable')), (mode, r['open']))
+class ElemDups(unittest.TestCase):
+    def tbl(self, ids, rw=28):
+        import struct
+        return b'\0\0' + struct.pack('<I', len(ids)) + b''.join(i.to_bytes(4, 'little') + bytes(rw - 4) for i in ids)
+    def test_dups(self):
+        sys.path.insert(0, os.path.join(HERE, '..', 'tools')); import rvtreadcov as R
+        self.assertEqual(R.elemtable_dups(self.tbl([1, 2, 3])), 0)
+        self.assertEqual(R.elemtable_dups(self.tbl([1, 2, 2, 3, 3])), 2)
+        self.assertIsNone(R.elemtable_dups(b'\0\0\5\0\0\0'))
 if __name__ == '__main__': unittest.main()

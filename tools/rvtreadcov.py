@@ -13,6 +13,15 @@ def truncated(o, p):
     for e in o.direntries:
         if e is not None and e.entry_type == 2 and e.size >= o.minisectorcutoff: need += -(-e.size // ss)
     return os.path.getsize(p) < need * ss
+def elemtable_dups(a):
+    """ids repeated in a decompressed Global/ElemTable (header 6 bytes, count at 2, rows of 28 or 40 bytes, id first); None if layout unrecognised"""
+    import struct
+    if len(a) < 6: return None
+    n = struct.unpack_from('<I', a, 2)[0]
+    RW, W = next(((rw, w) for rw, w in ((28, 4), (40, 8)) if 0 <= len(a) - 6 - rw * n < 64), (28, 4) if 0 <= len(a) - 6 - 28 * n else (None, None))
+    if RW is None: return None
+    ids = [int.from_bytes(a[6 + RW * q:6 + RW * q + W], 'little') for q in range(n)]
+    return len(ids) - len(set(ids))
 def check_members(raw):
     """every gzip member of a paged stream must inflate and match its CRC32/ISIZE trailer (rvt2text.segments skips bad members silently)"""
     import zlib, struct
@@ -62,7 +71,8 @@ def stream_inventory(p):
             elif n.startswith('\x05') or n.startswith('TransmissionData') or n.startswith('RevitPreview') or n == 'Contents':
                 st = 'opaque'
             else:
-                inflate_stream(raw); check_members(raw); st = 'decoded' if DECODED.match(n) else 'opaque'
+                _p, _a, _u = inflate_stream(raw); check_members(raw); st = 'decoded' if DECODED.match(n) else 'opaque'
+                if n == 'Global/ElemTable' and elemtable_dups(_a): st = 'error:ElemTable duplicate ids %d' % elemtable_dups(_a)
         except Exception as x:
             st = 'error:' + type(x).__name__ + ' ' + str(x)[:40]
         k = 'Partitions/N' if n.startswith('Partitions/') else n
