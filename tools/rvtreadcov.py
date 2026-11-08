@@ -124,6 +124,10 @@ def stream_inventory(p):
                 import zipfile, io
                 bad = zipfile.ZipFile(io.BytesIO(raw)).testzip()
                 st = 'opaque' if bad is None else 'error:zip member ' + str(bad)[:20]
+            elif n == 'Contents':
+                # magic 62 19 22 05 at offset 0 in 78 of 78 corpus files (2017-2026)
+                if raw[:4] != bytes.fromhex('62192205'): raise ValueError('Contents lacks magic 62192205')
+                st = 'opaque'
             elif n == 'TransmissionData':
                 # u32 char count + UTF-16LE XML; 78 of 78 corpus files satisfy len == 4 + 2*count and start with <?xml
                 import struct as _s

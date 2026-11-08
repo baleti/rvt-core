@@ -18,3 +18,12 @@ class TD(unittest.TestCase):
         p = self._flip(lambda r: r.__setitem__(4, 0x41))
         self.assertTrue(R.stream_inventory(p)['TransmissionData'][1].startswith('error'))
 if __name__ == '__main__': unittest.main()
+class Contents(TD):
+    def _flipc(self, f):
+        d = tempfile.mkdtemp(); p = os.path.join(d, 't.rte'); shutil.copy(SRC, p)
+        o = olefile.OleFileIO(p, write_mode=True); raw = bytearray(o.openstream('Contents').read()); f(raw)
+        o.write_stream('Contents', bytes(raw)); o.close(); return p
+    def test_contents_clean(self):
+        self.assertEqual(R.stream_inventory(self._flipc(lambda r: None))['Contents'][1], 'opaque')
+    def test_contents_magic_flip(self):
+        self.assertTrue(R.stream_inventory(self._flipc(lambda r: r.__setitem__(1, r[1] ^ 1)))['Contents'][1].startswith('error'))
