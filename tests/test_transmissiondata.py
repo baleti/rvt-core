@@ -37,3 +37,15 @@ class Preview(unittest.TestCase):
     def test_png_body_flip(self):
         def f(r): i = r.find(b'IDAT') + 8; r[i] ^= 0x55
         self.assertTrue(R.stream_inventory(self._mod(f))['RevitPreview4.0'][1].startswith('error'))
+class History(unittest.TestCase):
+    def _a(self, ids, count=None):
+        import struct
+        a = bytearray(106 + 4 * len(ids)); struct.pack_into('<I', a, 102, len(ids) if count is None else count); struct.pack_into('<%dI' % len(ids), a, 106, *ids); return bytes(a)
+    def test_ok(self): self.assertIsNone(R.history_bad(self._a([3, 5, 9])))
+    def test_swapped(self): self.assertIn('ascending', R.history_bad(self._a([3, 9, 5])))
+    def test_dup(self): self.assertIn('ascending', R.history_bad(self._a([3, 3, 5])))
+    def test_count_too_big(self): self.assertIn('longer', R.history_bad(self._a([3, 5], count=99)))
+    def test_real_file_clean(self):
+        d = tempfile.mkdtemp(); p = os.path.join(d, 't.rte'); shutil.copy(SRC, p)
+        self.assertFalse(R.stream_inventory(p)['Global/History'][1].startswith('error'))
+if __name__ == '__main__': unittest.main()
