@@ -91,6 +91,19 @@ class FatFlip(unittest.TestCase):
             f = tempfile.NamedTemporaryFile(suffix='.rvt', delete=False); f.write(x); f.close(); self.addCleanup(os.unlink, f.name)
             r = run(f.name); refused += r['open'] != 'ok' or any(str(v[1]).startswith('error') for v in r['streams'].values())
         self.assertEqual(refused, 3)
+@unittest.skipUnless(SRC, 'sample corpus absent')
+class MiniFatFlip(unittest.TestCase):
+    def test_minifat_pointer_flips_in_basicfileinfo(self):
+        import olefile, struct, io
+        b = open(SRC, 'rb').read(); o = olefile.OleFileIO(SRC); o.openstream('BasicFileInfo'); o.loadminifat(); ss = 1 << struct.unpack_from('<H', b, 30)[0]
+        d = o.direntries[o._find('BasicFileInfo')]; ch = []; s = d.isectStart
+        while s < 0xfffffffa: ch.append(s); s = o.minifat[s]
+        caught = 0
+        for k in range(0, len(ch) - 1, 3):       # mini-FAT next pointer off by one garbles the stream; only damage that removes a label is detectable (about a third of the pointers), the rest alters values
+            x = bytearray(b); x[(o.first_mini_fat_sector + 1) * ss + 4 * ch[k]] ^= 1
+            f = tempfile.NamedTemporaryFile(suffix='.rvt', delete=False); f.write(x); f.close(); self.addCleanup(os.unlink, f.name)
+            r = run(f.name); caught += str(r['streams']['BasicFileInfo'][1]).startswith('error')
+        self.assertGreaterEqual(caught, 3)
 class ElemDups(unittest.TestCase):
     def tbl(self, ids, rw=28):
         import struct

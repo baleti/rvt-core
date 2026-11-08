@@ -69,6 +69,9 @@ def stream_inventory(p):
                 check_members(raw)
                 st = 'decoded'
             elif n == 'BasicFileInfo':
+                _t = ''.join(raw[a:].decode('utf-16le', 'ignore') for a in (0, 1))     # UTF-16 text starts at an odd or even byte
+                _m = [l for l in ('Worksharing:', 'Central Model Path:', 'Build:', 'Username:', 'Open Workset Default:') if l not in _t]   # present in 1115 of 1115 local files, 2017-2026
+                if _m: raise ValueError('BasicFileInfo lacks label %s (mini-stream damage?)' % _m[0])
                 st = 'decoded'
             elif n == 'PartAtom' and raw.lstrip(b'\xef\xbb\xbf')[:5] == b'<?xml':
                 import xml.dom.minidom as M, xml.parsers.expat as X
