@@ -60,6 +60,21 @@ class HeaderFlip(unittest.TestCase):
     def test_first_minifat_wrong_chain(self): self.assertIn('mini-FAT', self.flip(60, bytes([0xfd])).get('open', ''))   # Revit 2024 refuses
     def test_minifat_count_absurd(self): self.assertIn('mini-FAT', self.flip(66, bytes([0xff])).get('open', ''))     # Revit 2024 refuses
     def test_minifat_count_larger_opens(self): self.assertEqual(self.flip(64, bytes([0xfe]))['open'], 'ok')           # Revit 2024 opens
+@unittest.skipUnless(SRC, 'sample corpus absent')
+class DirEntryFlip(unittest.TestCase):
+    def test_storage_type_flip_drops_streams(self):
+        import struct
+        b = bytearray(open(SRC, 'rb').read()); ds = struct.unpack_from('<I', b, 48)[0]; base = (ds + 1) * (1 << struct.unpack_from('<H', b, 30)[0])
+        hit = 0
+        for e in range(1, 12):     # flip the type byte of each storage entry: every one that hides a core storage must be an error
+            r = b[base + 128 * e:base + 128 * e + 128]
+            if len(r) < 128 or r[66] != 1: continue
+            nm = r[:64].decode('utf-16le', 'ignore').split('\0')[0]
+            if nm not in ('Formats', 'Global', 'Partitions'): continue
+            x = bytearray(b); x[base + 128 * e + 66] ^= 0xff
+            f = tempfile.NamedTemporaryFile(suffix='.rvt', delete=False); f.write(x); f.close(); self.addCleanup(os.unlink, f.name)
+            self.assertIn('missing core stream', run(f.name)['open'], nm); hit += 1
+        self.assertEqual(hit, 3)
 class ElemDups(unittest.TestCase):
     def tbl(self, ids, rw=28):
         import struct

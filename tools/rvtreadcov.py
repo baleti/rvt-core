@@ -7,6 +7,7 @@ and with --records the per-class record decode counts from rvt-research cov_year
 import sys, os, json, hashlib, re, subprocess, time
 RR = os.path.expanduser('~/rvt-research'); sys.path.insert(0, RR)
 DECODED = re.compile(r'^(Formats/Latest|Global/ElemTable|Partitions/\d+|BasicFileInfo|Global/PartitionTable|Global/Latest|Global/History|Global/ContentDocuments)$')
+CORE = ('BasicFileInfo', 'Formats/Latest', 'Global/Latest', 'Global/ElemTable', 'Global/PartitionTable', 'Global/History', 'Partitions/N')
 def truncated(o, p):
     """olefile pads a truncated file with zeros instead of failing: the sectors the directory says exist must fit in the file"""
     ss = o.sectorsize; need = 1 + -(-o.root.size // ss)
@@ -103,6 +104,9 @@ if __name__ == '__main__':
     r = {'sha8': hashlib.sha256(open(p, 'rb').read()).hexdigest()[:8], 'size': os.path.getsize(p), 'ext': os.path.splitext(p)[1].lower()}
     try:
         r['year'] = year_of(p); r['streams'] = stream_inventory(p); r['open'] = 'ok'
+        if p.lower().endswith(('.rvt', '.rte')):     # all 1115 local .rvt/.rte have these; a directory-entry flip (type byte) silently drops a whole storage and used to read ok
+            miss = [k for k in CORE if k not in r['streams']]
+            if miss: r['open'] = 'error:ValueError missing core stream ' + ','.join(miss)[:50]
     except Exception as x:
         r['open'] = 'error:' + type(x).__name__ + ' ' + str(x)[:60]
     if '--records' in sys.argv and r['open'] == 'ok':
