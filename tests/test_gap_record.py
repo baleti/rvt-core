@@ -29,3 +29,11 @@ class Gap2(unittest.TestCase):
         with self.assertRaises(ValueError): R.check_members(bytes(x))
     def test_clean(self):
         raw, e = self._raw(); self.assertGreater(R.check_members(raw), 3)
+class Gap3(Gap2):
+    """32-byte record words: count @12 and x @20 satisfy len(next plaintext) - x == count*k (k 8/12/16/20); sweeps of 2020/2024/2026 accepted flips there"""
+    def test_count_flip(self):
+        raw, e = self._raw(); x = bytearray(raw); x[e + 12] ^= 0x01
+        with self.assertRaises(ValueError): R.check_members(bytes(x))
+    def test_x_flip(self):
+        raw, e = self._raw(); x = bytearray(raw); x[e + 20] ^= 0x04
+        with self.assertRaises(ValueError): R.check_members(bytes(x))

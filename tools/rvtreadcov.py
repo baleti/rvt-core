@@ -73,6 +73,10 @@ def check_members(raw):
             if struct.unpack_from('<I', g, 2)[0] != (prev_end - prev_i) + 8: raise ValueError('member %d at %d: inter-member record does not carry the previous member length (chain record damaged)' % (n, i))   # 100% of ~5000 sampled gaps, 2017-2026
             if tag is None: tag = g[:2]
             elif g[:2] != tag: raise ValueError('member %d at %d: inter-member record tag differs from the stream\'s other records' % (n, i))   # constant within a stream in all sampled files
+            if len(g) == 32:
+                # 32-byte record: u32 count @12, u32 x @20 with len(next plaintext) - x == count * k, k in {8,12,16,20} (a per-year record size), or count 0 and len - x in {0,4}: held in every gap of 20 files 2016-2026
+                c, x = struct.unpack_from('<II', g, 12)[0], struct.unpack_from('<I', g, 20)[0]; r = len(out) - x
+                if not ((c == 0 and r in (0, 4)) or (c > 0 and r > 0 and r % c == 0 and r // c in (8, 12, 16, 20))): raise ValueError('member %d at %d: inter-member record count/offset words inconsistent with the member size (chain record damaged)' % (n, i))
             if struct.unpack_from('<I', g, len(g) - 16)[0] != (end - i) + 8: raise ValueError('member %d at %d: inter-member record length field does not match the member (chain record damaged)' % (n, i))
         prev_i = i; prev_end = end; n += 1; pos = end
 def member_diff(a, b):
