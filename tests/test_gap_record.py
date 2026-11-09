@@ -37,3 +37,19 @@ class Gap3(Gap2):
     def test_x_flip(self):
         raw, e = self._raw(); x = bytearray(raw); x[e + 20] ^= 0x04
         with self.assertRaises(ValueError): R.check_members(bytes(x))
+class Gap4(Gap2):
+    """the 220-byte record carries the same count/x words 20/12 bytes from its end"""
+    def test_220_count_and_x(self):
+        raw = olefile.OleFileIO(SRC).openstream('Partitions/59').read(); data = strip_pages(raw)
+        pos = pe = 0; found = None
+        while True:
+            i = data.find(GZ, pos)
+            if i < 0: break
+            d = zlib.decompressobj(-15); d.decompress(memoryview(data)[i + 10:]); e = len(data) - len(d.unused_data) + 8
+            if pe and i - pe == 220 and (i - 20) // 64896 == (i - 1) // 64896: found = i; break
+            pe = e; pos = e
+        if found is None: self.skipTest('no 220-byte gap in the first page')
+        for off in (found - 20, found - 12):
+            off += off // 64896 * 353   # stripped offset -> stored offset (353-byte page trailer after each 64896-byte payload)
+            x = bytearray(raw); x[off] ^= 0x04
+            with self.assertRaises(ValueError): R.check_members(bytes(x))
