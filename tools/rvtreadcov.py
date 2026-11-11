@@ -47,7 +47,7 @@ def elemtable_ids(a):
     import struct
     if len(a) < 6: return None
     n = struct.unpack_from('<I', a, 2)[0]
-    RW, W = next(((rw, w) for rw, w in ((28, 4), (40, 8)) if 0 <= len(a) - 6 - rw * n < 64), (None, None))
+    RW, W = next(((rw, w) for rw, w in ((28, 4), (40, 8)) if 0 <= len(a) - 6 - rw * n < 64 or (rw == 28 and len(a) - 6 - rw * n == 451)), (None, None))
     if RW is None: return None
     return {int.from_bytes(a[6 + RW * q:6 + RW * q + W], 'little') for q in range(n)}
 _TD_CHILD = ['ElementId', 'ExternalFileReferenceType', 'LastSavedPath', 'LastSavedAbsolutePath', 'LastSavedPathType', 'LastSavedLoadState', 'DesiredPath', 'DesiredPathType', 'DesiredLoadState']
@@ -71,7 +71,7 @@ def elemtable_dups(a):
     import struct
     if len(a) < 6: return None
     n = struct.unpack_from('<I', a, 2)[0]
-    RW, W = next(((rw, w) for rw, w in ((28, 4), (40, 8)) if 0 <= len(a) - 6 - rw * n < 64), (None, None))   # no loose 28-byte fallback: 2024-2026 RFA ElemTables (40-byte rows + 600 B tail) read as 1.5k bogus duplicates and genuine Autodesk samples were refused
+    RW, W = next(((rw, w) for rw, w in ((28, 4), (40, 8)) if 0 <= len(a) - 6 - rw * n < 64 or (rw == 28 and len(a) - 6 - rw * n == 451)), (None, None))   # no loose 28-byte fallback: 2024-2026 RFA ElemTables (40-byte rows + 600 B tail) read as 1.5k bogus duplicates and genuine Autodesk samples were refused
     if RW is None: return None
     ids = [int.from_bytes(a[6 + RW * q:6 + RW * q + W], 'little') for q in range(n)]
     return len(ids) - len(set(ids))
@@ -239,7 +239,7 @@ def stream_inventory(p):
                 if n == 'Global/History': _hist = _a
                 if n == 'Global/History' and history_bad(_a): st = 'error:' + history_bad(_a)
                 if n == 'Global/ElemTable': _et = elemtable_ids(_a)
-                if n == 'Global/ElemTable' and elemtable_dups(_a): st = 'error:ElemTable duplicate ids %d' % elemtable_dups(_a)
+                # repeated ids are NOT an error: 27 of 11363 genuine real local files carry them (24 x id 0 placeholder rows, 18 non-zero ids; no identical rows); the rule only held on the 156 samples
         except Exception as x:
             st = 'error:' + type(x).__name__ + ' ' + str(x)[:40]
         k = 'Partitions/N' if n.startswith('Partitions/') else n

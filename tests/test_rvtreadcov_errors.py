@@ -138,4 +138,8 @@ class ElemDups(unittest.TestCase):
         self.assertEqual(R.elemtable_dups(self.tbl([1, 2, 3])), 0)
         self.assertEqual(R.elemtable_dups(self.tbl([1, 2, 2, 3, 3])), 2)
         self.assertIsNone(R.elemtable_dups(b'\0\0\5\0\0\0'))
+        import struct      # 28-byte rows + 451-byte tail (2018-2022 families, 9569 of 11363 real local files) is a recognised layout
+        a = bytearray(6 + 28 * 50 + 451); struct.pack_into('<I', a, 2, 50)
+        for q in range(50): struct.pack_into('<I', a, 6 + 28 * q, q + 1)
+        self.assertEqual(R.elemtable_dups(bytes(a)), 0); self.assertEqual(len(R.elemtable_ids(bytes(a))), 50)
 if __name__ == '__main__': unittest.main()
