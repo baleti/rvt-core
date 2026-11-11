@@ -185,6 +185,13 @@ def stream_inventory(p):
             elif n == 'Contents':
                 # magic 62 19 22 05 at offset 0 in 78 of 78 corpus files (2017-2026)
                 if raw[:4] != bytes.fromhex('62192205'): raise ValueError('Contents lacks magic 62192205')
+                _i = raw.find(b'\x1f\x8b', 20)
+                if _i >= 0:   # the gzip block verifies (CRC32 + ISIZE) in 156 of 156 local files; 43..56 slack bytes follow it
+                    import zlib as _z, struct as _s2
+                    _d = _z.decompressobj(-15)
+                    try: _o = _d.decompress(raw[_i + 10:])
+                    except _z.error as _e: raise ValueError('Contents gzip: ' + str(_e)[:30])
+                    if not _d.eof or len(_d.unused_data) < 8 or _s2.unpack('<II', _d.unused_data[:8]) != (_z.crc32(_o) & 0xffffffff, len(_o)): raise ValueError('Contents gzip CRC/ISIZE mismatch')
                 st = 'opaque'
             elif n == 'TransmissionData':
                 # u32 char count + UTF-16LE XML; 78 of 78 corpus files satisfy len == 4 + 2*count and start with <?xml

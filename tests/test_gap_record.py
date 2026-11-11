@@ -186,3 +186,18 @@ class GlobalPrefix(unittest.TestCase):
             with tempfile.NamedTemporaryFile(suffix='.rte') as f:
                 f.write(data); f.flush(); st = R.stream_inventory(f.name)[name][1]
             self.assertTrue(st.startswith('error:'), (name, st))
+@unittest.skipUnless(os.path.exists(SRC), 'sample absent')
+class ContentsGzip(unittest.TestCase):
+    """Contents holds a gzip block (CRC verified in 156 of 156 local files); a flip inside it was accepted (11 of 12 random Contents flips undetected)"""
+    def test_flip(self):
+        import tempfile
+        o = olefile.OleFileIO(SRC); o.loadminifat(); raw = o.openstream('Contents').read(); i = raw.find(b'\x1f\x8b', 20); self.assertGreater(i, 0)
+        ent = o.direntries[o._find('Contents')]; chain = []; s = ent.isectStart
+        while s < 0xFFFFFFFA: chain.append(s); s = o.minifat[s]
+        rc = []; s = o.direntries[0].isectStart
+        while s < 0xFFFFFFFA: rc.append(s); s = o.fat[s]
+        for dk in (12, 14, 20):
+            k = i + dk; p = chain[k // o.minisectorsize] * o.minisectorsize + k % o.minisectorsize; off = (rc[p // o.sectorsize] + 1) * o.sectorsize + p % o.sectorsize
+            data = bytearray(open(SRC, 'rb').read()); data[off] ^= 0x04
+            with tempfile.NamedTemporaryFile(suffix='.rte') as f:
+                f.write(data); f.flush(); self.assertTrue(R.stream_inventory(f.name)['Contents'][1].startswith('error:'), dk)
