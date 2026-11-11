@@ -61,3 +61,8 @@ class Gap5(Gap2):
     def test_end_pad_flip(self):
         raw, e = self._raw(); x = bytearray(raw); x[e + 29] ^= 0x01
         with self.assertRaises(ValueError): R.check_members(bytes(x))
+class Gap6(Gap2):
+    """bytes 6..7 of the 32-byte gap record are constant within a stream (0 of 103 streams vary in 78 files)"""
+    def test_const_flip(self):
+        raw, e = self._raw(); x = bytearray(raw); x[e + 6] ^= 0x01
+        with self.assertRaises(ValueError): R.check_members(bytes(x))
