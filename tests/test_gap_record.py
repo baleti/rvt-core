@@ -201,3 +201,11 @@ class ContentsGzip(unittest.TestCase):
             data = bytearray(open(SRC, 'rb').read()); data[off] ^= 0x04
             with tempfile.NamedTemporaryFile(suffix='.rte') as f:
                 f.write(data); f.flush(); self.assertTrue(R.stream_inventory(f.name)['Contents'][1].startswith('error:'), dk)
+class TransmissionSchema(unittest.TestCase):
+    def _x(self, **kw):
+        ref = '<ExternalFileReference><ElementId>5</ElementId><ExternalFileReferenceType>%(t)s</ExternalFileReferenceType><LastSavedPath>a</LastSavedPath><LastSavedAbsolutePath>b</LastSavedAbsolutePath><LastSavedPathType>Absolute</LastSavedPathType><LastSavedLoadState>Loaded</LastSavedLoadState><DesiredPath>a</DesiredPath><DesiredPathType>Absolute</DesiredPathType><DesiredLoadState>Loaded</DesiredLoadState></ExternalFileReference>'
+        return ('<?xml version="1.0"?><TransmissionData isTransmitted="false" userData="" version="5">' + ref % {'t': kw.get('t', 'Revit Link')} + '</TransmissionData>').encode()
+    def test_ok(self): self.assertEqual(R.transmission_bad(self._x()), (None, [5]))
+    def test_enum_flip(self): self.assertIsNotNone(R.transmission_bad(self._x(t='Revit Lijk'))[0])
+    def test_root_flip(self): self.assertIsNotNone(R.transmission_bad(self._x().replace(b'version="5"', b'version="4"'))[0])
+    def test_tag_flip(self): self.assertIsNotNone(R.transmission_bad(self._x().replace(b'<DesiredPath>', b'<DesiredPatx>').replace(b'</DesiredPath>', b'</DesiredPatx>'))[0])

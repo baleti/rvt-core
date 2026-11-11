@@ -42,6 +42,30 @@ def dirtree_bad(o):
     used = {i for i, (t, _) in enumerate(ents) if t != 0}
     if used - seen: return 'directory entries %s in use but unreachable from the root' % sorted(used - seen)[:5]
     return None
+def elemtable_ids(a):
+    """set of ids in a decompressed Global/ElemTable (same layout rule as elemtable_dups); None if unrecognised"""
+    import struct
+    if len(a) < 6: return None
+    n = struct.unpack_from('<I', a, 2)[0]
+    RW, W = next(((rw, w) for rw, w in ((28, 4), (40, 8)) if 0 <= len(a) - 6 - rw * n < 64), (None, None))
+    if RW is None: return None
+    return {int.from_bytes(a[6 + RW * q:6 + RW * q + W], 'little') for q in range(n)}
+_TD_CHILD = ['ElementId', 'ExternalFileReferenceType', 'LastSavedPath', 'LastSavedAbsolutePath', 'LastSavedPathType', 'LastSavedLoadState', 'DesiredPath', 'DesiredPathType', 'DesiredLoadState']
+_TD_ENUM = {'ExternalFileReferenceType': {'Keynote Table', 'Assembly Code Table', 'Revit Link', 'Decal'}, 'LastSavedPathType': {'Relative to Library Locations', 'Relative to Central Model', 'Absolute'}, 'DesiredPathType': {'Relative to Library Locations', 'Relative to Central Model', 'Absolute'}, 'LastSavedLoadState': {'Loaded', 'Unloaded', 'Not Found'}, 'DesiredLoadState': {'Loaded', 'Unloaded'}}
+def transmission_bad(xml):
+    """schema of TransmissionData as seen in 156 of 156 local files (508 references): fixed root attributes, 9 children in fixed order, closed enumerations; returns (error or None, [ElementId ints])"""
+    import xml.etree.ElementTree as ET
+    r = ET.fromstring(xml)
+    if r.tag != 'TransmissionData' or r.attrib != {'isTransmitted': 'false', 'userData': '', 'version': '5'}: return 'root element/attributes', []
+    ids = []
+    for e in r:
+        if e.tag != 'ExternalFileReference' or e.attrib or [c.tag for c in e] != _TD_CHILD: return 'reference structure', []
+        v = {c.tag: c.text or '' for c in e}
+        for k, ok in _TD_ENUM.items():
+            if v[k] not in ok: return 'value of %s' % k, []
+        if not v['ElementId'].lstrip('-').isdigit(): return 'ElementId not numeric', []
+        ids.append(int(v['ElementId']))
+    return None, ids
 def elemtable_dups(a):
     """ids repeated in a decompressed Global/ElemTable (header 6 bytes, count at 2, rows of 28 or 40 bytes, id first); None if layout unrecognised"""
     import struct
@@ -141,7 +165,7 @@ def png_bad(raw):
 def stream_inventory(p):
     import olefile
     from rvtfmt import inflate_stream
-    out = {}; _bfi = _dit = _hist = None
+    out = {}; _bfi = _dit = _hist = _td_ids = _et = None
     import struct
     import cfbhdr
     _hv = cfbhdr.violations(open(p, 'rb').read(512))     # strict [MS-CFB] header rules: 0 violations in 12558 local rvt/rte/rfa; stricter than Revit 2024, which still opens flips at 28, 29, 36, 40
@@ -201,6 +225,8 @@ def stream_inventory(p):
                 import xml.dom.minidom as _M
                 try: _M.parseString(raw[4:].decode('utf-16-le').encode('utf-8').replace(b'encoding="utf-16"', b'encoding="utf-8"'))   # well-formed in 396 of 396 genuine local files
                 except Exception as _e: raise ValueError('TransmissionData XML not well-formed: ' + str(_e)[:30])
+                _tb, _td_ids = transmission_bad(raw[4:].decode('utf-16-le').encode('utf-8').replace(b'encoding="utf-16"', b'encoding="utf-8"'))
+                if _tb: raise ValueError('TransmissionData schema: ' + _tb)
                 st = 'opaque'
             elif n.startswith('RevitPreview') and png_bad(raw):
                 raise ValueError(png_bad(raw))
@@ -212,6 +238,7 @@ def stream_inventory(p):
                 if n == 'Global/DocumentIncrementTable': _dit = _a
                 if n == 'Global/History': _hist = _a
                 if n == 'Global/History' and history_bad(_a): st = 'error:' + history_bad(_a)
+                if n == 'Global/ElemTable': _et = elemtable_ids(_a)
                 if n == 'Global/ElemTable' and elemtable_dups(_a): st = 'error:ElemTable duplicate ids %d' % elemtable_dups(_a)
         except Exception as x:
             st = 'error:' + type(x).__name__ + ' ' + str(x)[:40]
@@ -227,6 +254,8 @@ def stream_inventory(p):
             _g = re.search(re.escape(_lab) + r':\s*([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})', _bfi)
             if _g and int(_g.group(1).replace('-', ''), 16) and uuid.UUID(_g.group(1)).bytes_le not in _hist:   # both GUIDs sit (little-endian) in Global/History in 25 of 25 sampled files
                 out['BasicFileInfo'][1] = 'error:%s not found in Global/History' % _lab[:20]
+    if _td_ids and _et and out.get('TransmissionData', [0, ''])[1] == 'opaque' and any(i not in _et for i in _td_ids):   # 508 of 508 references name an element in Global/ElemTable
+        out['TransmissionData'][1] = 'error:ElementId not in Global/ElemTable'
     return out
 def year_of(p):
     import olefile
