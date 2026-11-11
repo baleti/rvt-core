@@ -59,7 +59,7 @@ def check_members(raw):
     """every gzip member of a paged stream must inflate and match its CRC32/ISIZE trailer (rvt2text.segments skips bad members silently)"""
     import zlib, struct
     from rvtfmt import strip_pages, GZ
-    data = strip_pages(raw); pos = n = prev_end = prev_i = 0; tag = k32 = None; ref = {}
+    data = strip_pages(raw); pos = n = prev_end = prev_i = 0; tag = k32 = mod32 = None; ref = {}
     while True:
         i = data.find(GZ, pos)
         if i < 0: return n
@@ -79,6 +79,12 @@ def check_members(raw):
             elif g[:2] != tag: raise ValueError('member %d at %d: inter-member record tag differs from the stream\'s other records' % (n, i))   # constant within a stream in all sampled files
             if struct.unpack_from('<II', g, len(g) - 8)[1] != 0 or struct.unpack_from('<I', g, len(g) - 8)[0] not in (101, 102, 103): raise ValueError('member %d at %d: inter-member record end words are not (101..103, 0) (chain record damaged)' % (n, i))   # 41148 of 41148 gaps in 20 files 2016-2026
             if len(g) == 32:
+                v8 = struct.unpack_from('<I', g, 8)[0]
+                if mod32 is None:
+                    if not (4 <= v8 <= 7 or v8 >= 400): raise ValueError('member %d at %d: inter-member record word at 8 is %d (chain record damaged)' % (n, i, v8))
+                    mod32 = 4 <= v8 <= 7     # 2018-2026: 4..7 in 77840 of 77840 gaps; 2017: 404..2968 (5687 gaps)
+                elif mod32 and not 4 <= v8 <= 7: raise ValueError('member %d at %d: inter-member record word at 8 is %d, outside 4..7 (chain record damaged)' % (n, i, v8))
+                elif not mod32 and v8 < 400: raise ValueError('member %d at %d: inter-member record word at 8 is %d, below 400 (chain record damaged)' % (n, i, v8))
                 if k32 is None: k32 = g[6:8]
                 elif g[6:8] != k32: raise ValueError('member %d at %d: inter-member record bytes 6..7 differ from the stream\'s other records (chain record damaged)' % (n, i))   # constant within each of 103 streams, 83527 gaps, 78 local files
             if len(g) in _VAR:

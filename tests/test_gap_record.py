@@ -104,3 +104,8 @@ class Gap8(unittest.TestCase):
             o = hits[1] + off; o += o // 64896 * 353
             x = bytearray(raw); x[o] ^= 0x01
             with self.assertRaises(ValueError): R.check_members(bytes(x))
+class Gap9(Gap2):
+    """u32 at offset 8 of the 32-byte gap record is 4..7 in 2018-2026 (77840 of 77840 gaps); a flip to a high byte was accepted"""
+    def test_word8_flip(self):
+        raw, e = self._raw(); x = bytearray(raw); x[e + 9] ^= 0x01     # 4 -> 260
+        with self.assertRaises(ValueError): R.check_members(bytes(x))
