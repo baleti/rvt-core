@@ -86,3 +86,21 @@ class Gap7(unittest.TestCase):
             x = bytearray(raw); o = h[1] + off; o += o // 64896 * 353     # stripped -> stored offset (valid below first pages only if still in payload)
             x[o] ^= 0x01
             with self.assertRaises(ValueError): R.check_members(bytes(x))
+SRC17 = os.path.expanduser('~/rvt-research/corpus/2017/00_rst_basic_sample_project.rvt')
+@unittest.skipUnless(os.path.exists(SRC17), 'sample absent')
+class Gap8(unittest.TestCase):
+    """78-byte gap records (2017 files): 60 of 78 bytes were unchecked; bytes outside the id/hash/count fields are constant within a stream"""
+    def test_flip(self):
+        raw = olefile.OleFileIO(SRC17).openstream('Partitions/6').read(); data = strip_pages(raw)
+        pos = 0; prev = None; hits = []
+        while len(hits) < 3:
+            i = data.find(GZ, pos)
+            if i < 0: break
+            d = zlib.decompressobj(-15); d.decompress(memoryview(data)[i + 10:]); end = len(data) - len(d.unused_data) + 8
+            if prev is not None and i - prev == 78: hits.append(prev)
+            prev = end; pos = end
+        self.assertEqual(len(hits), 3)
+        for off in (20, 28, 56, 74):
+            o = hits[1] + off; o += o // 64896 * 353
+            x = bytearray(raw); x[o] ^= 0x01
+            with self.assertRaises(ValueError): R.check_members(bytes(x))
