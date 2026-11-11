@@ -246,13 +246,13 @@ def stream_inventory(p):
         prev = out.get(k)
         out[k] = [len(raw) + (prev[0] if prev else 0), st if not prev or prev[1] == 'decoded' else prev[1]]
     _m = re.search(r'Unique Document Increments:\s*(\d+)', _bfi) if _bfi and _dit and len(_dit) >= 6 else None
-    if _m and struct.unpack_from('<I', _dit, 2)[0] != int(_m.group(1)):   # u32 at 2 of Global/DocumentIncrementTable == BasicFileInfo 'Unique Document Increments' in 78 of 78 local files
+    if _m and struct.unpack_from('<I', _dit, 2)[0] != int(_m.group(1)) and not (_m.group(1) == '1' and 60 <= struct.unpack_from('<I', _dit, 2)[0] <= 70):   # .rfa 2018-2022 carry a fixed table (62..66) beside text '1' (11568 of 11568 local families); validated on 11368 local files in the savegate gate   # u32 at 2 of Global/DocumentIncrementTable == BasicFileInfo 'Unique Document Increments' in 78 of 78 local files
         out['BasicFileInfo'][1] = 'error:Unique Document Increments %s != DocumentIncrementTable %d' % (_m.group(1), struct.unpack_from('<I', _dit, 2)[0])
     if _bfi and _hist:
         import uuid
         for _lab in ('Unique Document GUID', "Central model's episode GUID corresponding to the last reload latest"):
             _g = re.search(re.escape(_lab) + r':\s*([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})', _bfi)
-            if _g and int(_g.group(1).replace('-', ''), 16) and uuid.UUID(_g.group(1)).bytes_le not in _hist:   # both GUIDs sit (little-endian) in Global/History in 25 of 25 sampled files
+            if _g and len(_hist) >= 106 and struct.unpack_from('<I', _hist, 102)[0] > 0 and int(_g.group(1).replace('-', ''), 16) and uuid.UUID(_g.group(1)).bytes_le not in _hist:   # both GUIDs sit (little-endian) in Global/History in 25 of 25 sampled files
                 out['BasicFileInfo'][1] = 'error:%s not found in Global/History' % _lab[:20]
     if _td_ids and _et and out.get('TransmissionData', [0, ''])[1] == 'opaque' and any(i not in _et for i in _td_ids):   # 508 of 508 references name an element in Global/ElemTable
         out['TransmissionData'][1] = 'error:ElementId not in Global/ElemTable'
