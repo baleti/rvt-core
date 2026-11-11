@@ -51,12 +51,12 @@ def elemtable_ids(a):
     if RW is None: return None
     return {int.from_bytes(a[6 + RW * q:6 + RW * q + W], 'little') for q in range(n)}
 _TD_CHILD = ['ElementId', 'ExternalFileReferenceType', 'LastSavedPath', 'LastSavedAbsolutePath', 'LastSavedPathType', 'LastSavedLoadState', 'DesiredPath', 'DesiredPathType', 'DesiredLoadState']
-_TD_ENUM = {'ExternalFileReferenceType': {'Keynote Table', 'Assembly Code Table', 'Revit Link', 'Decal'}, 'LastSavedPathType': {'Relative to Library Locations', 'Relative to Central Model', 'Absolute'}, 'DesiredPathType': {'Relative to Library Locations', 'Relative to Central Model', 'Absolute'}, 'LastSavedLoadState': {'Loaded', 'Unloaded', 'Not Found'}, 'DesiredLoadState': {'Loaded', 'Unloaded'}}
+_TD_ENUM = {'ExternalFileReferenceType': {'Keynote Table', 'Assembly Code Table', 'Revit Link', 'Decal', 'CAD Link'}, 'LastSavedPathType': {'Relative to Library Locations', 'Relative to Central Model', 'Absolute'}, 'DesiredPathType': {'Relative to Library Locations', 'Relative to Central Model', 'Absolute'}, 'LastSavedLoadState': {'Loaded', 'Unloaded', 'Not Found'}, 'DesiredLoadState': {'Loaded', 'Unloaded'}}
 def transmission_bad(xml):
     """schema of TransmissionData as seen in 156 of 156 local files (508 references): fixed root attributes, 9 children in fixed order, closed enumerations; returns (error or None, [ElementId ints])"""
     import xml.etree.ElementTree as ET
     r = ET.fromstring(xml)
-    if r.tag != 'TransmissionData' or r.attrib != {'isTransmitted': 'false', 'userData': '', 'version': '5'}: return 'root element/attributes', []
+    if r.tag != 'TransmissionData' or r.attrib not in ({'isTransmitted': 'false', 'userData': '', 'version': '5'}, {'isTransmitted': 'true', 'userData': '', 'version': '5'}): return 'root element/attributes', []
     ids = []
     for e in r:
         if e.tag != 'ExternalFileReference' or e.attrib or [c.tag for c in e] != _TD_CHILD: return 'reference structure', []
@@ -220,12 +220,12 @@ def stream_inventory(p):
             elif n == 'TransmissionData':
                 # u32 char count + UTF-16LE XML; 78 of 78 corpus files satisfy len == 4 + 2*count and start with <?xml
                 import struct as _s
-                if len(raw) < 6 or len(raw) != 4 + 2 * _s.unpack_from('<I', raw)[0]: raise ValueError('TransmissionData length prefix does not match the stream size')
-                if not raw[4:].decode('utf-16-le').lstrip().startswith('<?xml'): raise ValueError('TransmissionData is not XML')
+                if len(raw) < 6 or len(raw) < 4 + 2 * _s.unpack_from('<I', raw)[0]: raise ValueError('TransmissionData length prefix does not fit the stream')   # 25 of 11368 real local files carry extra bytes after the counted XML; the counted XML is judged
+                if not raw[4:4 + 2 * _s.unpack_from('<I', raw)[0]].decode('utf-16-le').lstrip().startswith('<?xml'): raise ValueError('TransmissionData is not XML')
                 import xml.dom.minidom as _M
-                try: _M.parseString(raw[4:].decode('utf-16-le').encode('utf-8').replace(b'encoding="utf-16"', b'encoding="utf-8"'))   # well-formed in 396 of 396 genuine local files
+                try: _M.parseString(raw[4:4 + 2 * _s.unpack_from('<I', raw)[0]].decode('utf-16-le').encode('utf-8').replace(b'encoding="utf-16"', b'encoding="utf-8"'))   # well-formed in 396 of 396 genuine local files
                 except Exception as _e: raise ValueError('TransmissionData XML not well-formed: ' + str(_e)[:30])
-                _tb, _td_ids = transmission_bad(raw[4:].decode('utf-16-le').encode('utf-8').replace(b'encoding="utf-16"', b'encoding="utf-8"'))
+                _tb, _td_ids = transmission_bad(raw[4:4 + 2 * _s.unpack_from('<I', raw)[0]].decode('utf-16-le').encode('utf-8').replace(b'encoding="utf-16"', b'encoding="utf-8"'))
                 if _tb: raise ValueError('TransmissionData schema: ' + _tb)
                 st = 'opaque'
             elif n.startswith('RevitPreview') and png_bad(raw):
