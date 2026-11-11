@@ -51,11 +51,13 @@ def elemtable_dups(a):
     if RW is None: return None
     ids = [int.from_bytes(a[6 + RW * q:6 + RW * q + W], 'little') for q in range(n)]
     return len(ids) - len(set(ids))
+# offsets that legitimately vary between 220-byte records of one stream (ids, hash/GUID, lengths, counts): measured on 2019 rst_basic Partitions/15 (52 records)
+_V220 = set(range(30, 94)) | {174, 175} | set(range(178, 194)) | {200, 201, 204, 205} | set(range(208, 212))
 def check_members(raw):
     """every gzip member of a paged stream must inflate and match its CRC32/ISIZE trailer (rvt2text.segments skips bad members silently)"""
     import zlib, struct
     from rvtfmt import strip_pages, GZ
-    data = strip_pages(raw); pos = n = prev_end = prev_i = 0; tag = k32 = None
+    data = strip_pages(raw); pos = n = prev_end = prev_i = 0; tag = k32 = r220 = None
     while True:
         i = data.find(GZ, pos)
         if i < 0: return n
@@ -77,6 +79,12 @@ def check_members(raw):
             if len(g) == 32:
                 if k32 is None: k32 = g[6:8]
                 elif g[6:8] != k32: raise ValueError('member %d at %d: inter-member record bytes 6..7 differ from the stream\'s other records (chain record damaged)' % (n, i))   # constant within each of 103 streams, 83527 gaps, 78 local files
+            if len(g) == 220:
+                if r220 is None: r220 = g
+                else:
+                    for q in range(4, 220):
+                        if q in _V220 or r220[q] == g[q]: continue
+                        raise ValueError('member %d at %d: inter-member record byte %d differs from the stream\'s other 220-byte records (chain record damaged)' % (n, i, q))   # offsets outside _V220 are constant within a stream
             if len(g) in (32, 220):
                 # 32/220-byte record: u32 count at len-20, u32 x at len-12 (the same words in both sizes) with len(next plaintext) - x == count * k, k in {8,12,16,20} (a per-year record size), or count 0 and len - x in {0,4}: held in every gap of 20 files 2016-2026
                 c, x = struct.unpack_from('<I', g, len(g) - 20)[0], struct.unpack_from('<I', g, len(g) - 12)[0]; r = len(out) - x
