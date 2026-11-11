@@ -53,3 +53,11 @@ class Gap4(Gap2):
             off += off // 64896 * 353   # stripped offset -> stored offset (353-byte page trailer after each 64896-byte payload)
             x = bytearray(raw); x[off] ^= 0x04
             with self.assertRaises(ValueError): R.check_members(bytes(x))
+class Gap5(Gap2):
+    """last two words of every gap record are (101|102|103, 0); sweep of a 2026 .rte accepted a flip in the 101 word"""
+    def test_end_word_flip(self):
+        raw, e = self._raw(); x = bytearray(raw); x[e + 25] ^= 0x01     # inside the 101 word of the first 32-byte record
+        with self.assertRaises(ValueError): R.check_members(bytes(x))
+    def test_end_pad_flip(self):
+        raw, e = self._raw(); x = bytearray(raw); x[e + 29] ^= 0x01
+        with self.assertRaises(ValueError): R.check_members(bytes(x))

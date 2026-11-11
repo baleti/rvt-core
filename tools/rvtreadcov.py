@@ -73,6 +73,7 @@ def check_members(raw):
             if struct.unpack_from('<I', g, 2)[0] != (prev_end - prev_i) + 8: raise ValueError('member %d at %d: inter-member record does not carry the previous member length (chain record damaged)' % (n, i))   # 100% of ~5000 sampled gaps, 2017-2026
             if tag is None: tag = g[:2]
             elif g[:2] != tag: raise ValueError('member %d at %d: inter-member record tag differs from the stream\'s other records' % (n, i))   # constant within a stream in all sampled files
+            if struct.unpack_from('<II', g, len(g) - 8)[1] != 0 or struct.unpack_from('<I', g, len(g) - 8)[0] not in (101, 102, 103): raise ValueError('member %d at %d: inter-member record end words are not (101..103, 0) (chain record damaged)' % (n, i))   # 41148 of 41148 gaps in 20 files 2016-2026
             if len(g) in (32, 220):
                 # 32/220-byte record: u32 count at len-20, u32 x at len-12 (the same words in both sizes) with len(next plaintext) - x == count * k, k in {8,12,16,20} (a per-year record size), or count 0 and len - x in {0,4}: held in every gap of 20 files 2016-2026
                 c, x = struct.unpack_from('<I', g, len(g) - 20)[0], struct.unpack_from('<I', g, len(g) - 12)[0]; r = len(out) - x
