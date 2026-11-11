@@ -55,6 +55,7 @@ def elemtable_dups(a):
 _V220 = set(range(30, 94)) | {174, 175} | set(range(178, 194)) | {200, 201, 204, 205} | set(range(208, 212))
 _V78 = set(range(32, 52)) | set(range(58, 70))     # 78-byte record (2017 files), measured on 2017 rst_basic Partitions/6 (52 records)
 _VAR = {220: _V220, 78: _V78}
+_PREFIX = {'Global/PartitionTable': bytes(8), 'Global/ElemTable': bytes(8), 'Global/DocumentIncrementTable': bytes([1]) + bytes(7), 'Global/History': bytes([1]) + bytes(7), 'Global/ContentDocuments': bytes([1]) + bytes(7), 'Global/Latest': bytes([5]) + bytes(7)}
 def check_members(raw):
     """every gzip member of a paged stream must inflate and match its CRC32/ISIZE trailer (rvt2text.segments skips bad members silently)"""
     import zlib, struct
@@ -199,6 +200,7 @@ def stream_inventory(p):
             elif n.startswith('\x05') or n.startswith('TransmissionData') or n.startswith('RevitPreview') or n == 'Contents':
                 st = 'opaque'
             else:
+                if n in _PREFIX and raw[:8] != _PREFIX[n]: raise ValueError('%s 8-byte header %s differs from the constant value' % (n, raw[:8].hex()))   # constant in 156 of 156 local files, 2016-2026
                 _p, _a, _u = inflate_stream(raw); check_members(raw); st = 'decoded' if DECODED.match(n) else 'opaque'
                 if n == 'Global/DocumentIncrementTable': _dit = _a
                 if n == 'Global/History': _hist = _a

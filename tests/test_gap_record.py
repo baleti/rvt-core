@@ -168,3 +168,21 @@ class BfiGuid(unittest.TestCase):
             f.write(data); f.flush()
             self.assertTrue(R.stream_inventory(SRC)['BasicFileInfo'][1] == 'decoded')
             self.assertTrue(R.stream_inventory(f.name)['BasicFileInfo'][1].startswith('error:Unique Document GUID'))
+@unittest.skipUnless(os.path.exists(SRC), 'sample absent')
+class GlobalPrefix(unittest.TestCase):
+    """the 8-byte header in front of the gzip data of Global/* streams is constant per stream (156 of 156 files); flips there were accepted"""
+    def test_prefix_flip(self):
+        import tempfile
+        o = olefile.OleFileIO(SRC)
+        for name, byte in (('Global/Latest', 0), ('Global/ElemTable', 3), ('Global/History', 7), ('Global/PartitionTable', 1)):
+            ent = o.direntries[o._find(name)]
+            data = bytearray(open(SRC, 'rb').read())
+            if ent.size < o.minisectorcutoff:
+                o.loadminifat(); rc = []; s = o.direntries[0].isectStart
+                while s < 0xFFFFFFFA: rc.append(s); s = o.fat[s]
+                p = ent.isectStart * o.minisectorsize + byte; off = (rc[p // o.sectorsize] + 1) * o.sectorsize + p % o.sectorsize
+            else: off = (ent.isectStart + 1) * o.sectorsize + byte
+            data[off] ^= 0x01
+            with tempfile.NamedTemporaryFile(suffix='.rte') as f:
+                f.write(data); f.flush(); st = R.stream_inventory(f.name)[name][1]
+            self.assertTrue(st.startswith('error:'), (name, st))
