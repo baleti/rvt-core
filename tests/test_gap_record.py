@@ -109,3 +109,19 @@ class Gap9(Gap2):
     def test_word8_flip(self):
         raw, e = self._raw(); x = bytearray(raw); x[e + 9] ^= 0x01     # 4 -> 260
         with self.assertRaises(ValueError): R.check_members(bytes(x))
+@unittest.skipUnless(os.path.exists(SRC17), 'sample absent')
+class Gap10(unittest.TestCase):
+    """2017 32-byte gap record: word at 8 is a slow counter (|delta| <= 12 between consecutive gaps); a flip of bit 6 (+-64) was accepted"""
+    def test_counter_flip(self):
+        raw = olefile.OleFileIO(SRC17).openstream('Partitions/6').read(); data = strip_pages(raw)
+        pos = 0; prev = None; hits = []
+        while len(hits) < 6:
+            i = data.find(GZ, pos)
+            if i < 0: break
+            d = zlib.decompressobj(-15); d.decompress(memoryview(data)[i + 10:]); end = len(data) - len(d.unused_data) + 8
+            if prev is not None and i - prev == 32: hits.append(prev)
+            prev = end; pos = end
+        self.assertEqual(len(hits), 6)
+        o = hits[4] + 8; o += o // 64896 * 353
+        x = bytearray(raw); x[o] ^= 0x40
+        with self.assertRaises(ValueError): R.check_members(bytes(x))
