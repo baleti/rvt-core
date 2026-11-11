@@ -125,3 +125,24 @@ class Gap10(unittest.TestCase):
         o = hits[4] + 8; o += o // 64896 * 353
         x = bytearray(raw); x[o] ^= 0x40
         with self.assertRaises(ValueError): R.check_members(bytes(x))
+class BfiIncrements(unittest.TestCase):
+    """BasicFileInfo 'Unique Document Increments' must equal the u32 at 2 of Global/DocumentIncrementTable (78 of 78 local files); a digit flip in the ministream text was accepted (0 of 12 random flips in BasicFileInfo detected)"""
+    @unittest.skipUnless(os.path.exists(SRC), 'sample absent')
+    def test_digit_flip(self):
+        import tempfile, re
+        o = olefile.OleFileIO(SRC); o.loadminifat(); raw = o.openstream('BasicFileInfo').read()
+        t = raw.decode('utf-16le', 'ignore'); a = raw[1:].decode('utf-16le', 'ignore')
+        key = 'Unique Document Increments: '.encode('utf-16le'); k = raw.find(key)
+        if k < 0: key = b'\x00' + key; k = raw.find(key)
+        self.assertGreater(k, 0); k += len(key)             # first digit's low byte (UTF-16LE)
+        ent = o.direntries[o._find('BasicFileInfo')]; chain = []; s = ent.isectStart
+        while s < 0xFFFFFFFA: chain.append(s); s = o.minifat[s]
+        root = o.direntries[0]; rc = []; s = root.isectStart
+        while s < 0xFFFFFFFA: rc.append(s); s = o.fat[s]
+        ssz, msz = o.sectorsize, o.minisectorsize
+        p = chain[k // msz] * msz; off = (rc[p // ssz] + 1) * ssz + p % ssz + k % msz
+        data = bytearray(open(SRC, 'rb').read()); self.assertIn(data[off], b'0123456789'); data[off] = ord('9') if data[off] != ord('9') else ord('8')
+        with tempfile.NamedTemporaryFile(suffix='.rte') as f:
+            f.write(data); f.flush()
+            self.assertTrue(R.stream_inventory(SRC)['BasicFileInfo'][1] == 'decoded')
+            self.assertTrue(R.stream_inventory(f.name)['BasicFileInfo'][1].startswith('error:Unique Document Increments'))

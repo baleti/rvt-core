@@ -140,7 +140,8 @@ def png_bad(raw):
 def stream_inventory(p):
     import olefile
     from rvtfmt import inflate_stream
-    out = {}
+    out = {}; _bfi = _dit = None
+    import struct
     import cfbhdr
     _hv = cfbhdr.violations(open(p, 'rb').read(512))     # strict [MS-CFB] header rules: 0 violations in 12558 local rvt/rte/rfa; stricter than Revit 2024, which still opens flips at 28, 29, 36, 40
     if _hv: raise ValueError('CFB header violates ' + ','.join(_hv))
@@ -168,7 +169,7 @@ def stream_inventory(p):
                 _m = [l for l in ('Worksharing:', 'Central Model Path:', 'Build:', 'Username:', 'Open Workset Default:') if l not in _t]   # present in 1115 of 1115 local files, 2017-2026
                 _y = re.search(r'Revit[^\n]*?(20\d\d)', _t)
                 if _m and not (_y and int(_y.group(1)) < 2016): raise ValueError('BasicFileInfo lacks label %s (mini-stream damage?)' % _m[0])   # pre-2016 files (outside the 1115 local 2016+ files the rule was calibrated on) legitimately lack some labels
-                st = 'decoded'
+                _bfi = _t; st = 'decoded'
             elif n == 'PartAtom' and raw.lstrip(b'\xef\xbb\xbf')[:5] == b'<?xml':
                 import xml.dom.minidom as M, xml.parsers.expat as X
                 try: M.parseString(raw.lstrip(b'\xef\xbb\xbf')); st = 'opaque'  # plain Atom XML in .rfa, well-formed
@@ -199,6 +200,7 @@ def stream_inventory(p):
                 st = 'opaque'
             else:
                 _p, _a, _u = inflate_stream(raw); check_members(raw); st = 'decoded' if DECODED.match(n) else 'opaque'
+                if n == 'Global/DocumentIncrementTable': _dit = _a
                 if n == 'Global/History' and history_bad(_a): st = 'error:' + history_bad(_a)
                 if n == 'Global/ElemTable' and elemtable_dups(_a): st = 'error:ElemTable duplicate ids %d' % elemtable_dups(_a)
         except Exception as x:
@@ -206,6 +208,9 @@ def stream_inventory(p):
         k = 'Partitions/N' if n.startswith('Partitions/') else n
         prev = out.get(k)
         out[k] = [len(raw) + (prev[0] if prev else 0), st if not prev or prev[1] == 'decoded' else prev[1]]
+    _m = re.search(r'Unique Document Increments:\s*(\d+)', _bfi) if _bfi and _dit and len(_dit) >= 6 else None
+    if _m and struct.unpack_from('<I', _dit, 2)[0] != int(_m.group(1)):   # u32 at 2 of Global/DocumentIncrementTable == BasicFileInfo 'Unique Document Increments' in 78 of 78 local files
+        out['BasicFileInfo'][1] = 'error:Unique Document Increments %s != DocumentIncrementTable %d' % (_m.group(1), struct.unpack_from('<I', _dit, 2)[0])
     return out
 def year_of(p):
     import olefile
