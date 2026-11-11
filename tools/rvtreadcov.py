@@ -254,8 +254,7 @@ def stream_inventory(p):
             _g = re.search(re.escape(_lab) + r':\s*([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})', _bfi)
             if _g and len(_hist) >= 106 and struct.unpack_from('<I', _hist, 102)[0] > 0 and int(_g.group(1).replace('-', ''), 16) and uuid.UUID(_g.group(1)).bytes_le not in _hist:   # both GUIDs sit (little-endian) in Global/History in 25 of 25 sampled files
                 out['BasicFileInfo'][1] = 'error:%s not found in Global/History' % _lab[:20]
-    if _td_ids and _et and out.get('TransmissionData', [0, ''])[1] == 'opaque' and any(i not in _et for i in _td_ids):   # 508 of 508 references name an element in Global/ElemTable
-        out['TransmissionData'][1] = 'error:ElementId not in Global/ElemTable'
+    # ElementId-in-ElemTable is NOT a valid error rule: holds in 508 of 508 references of the 156 samples but 3 of 1794 real local files with a recognised table layout have a reference to an id missing from the table (2026-11-11, aggregate)
     return out
 def year_of(p):
     import olefile
