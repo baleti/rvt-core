@@ -140,7 +140,7 @@ def png_bad(raw):
 def stream_inventory(p):
     import olefile
     from rvtfmt import inflate_stream
-    out = {}; _bfi = _dit = None
+    out = {}; _bfi = _dit = _hist = None
     import struct
     import cfbhdr
     _hv = cfbhdr.violations(open(p, 'rb').read(512))     # strict [MS-CFB] header rules: 0 violations in 12558 local rvt/rte/rfa; stricter than Revit 2024, which still opens flips at 28, 29, 36, 40
@@ -201,6 +201,7 @@ def stream_inventory(p):
             else:
                 _p, _a, _u = inflate_stream(raw); check_members(raw); st = 'decoded' if DECODED.match(n) else 'opaque'
                 if n == 'Global/DocumentIncrementTable': _dit = _a
+                if n == 'Global/History': _hist = _a
                 if n == 'Global/History' and history_bad(_a): st = 'error:' + history_bad(_a)
                 if n == 'Global/ElemTable' and elemtable_dups(_a): st = 'error:ElemTable duplicate ids %d' % elemtable_dups(_a)
         except Exception as x:
@@ -211,6 +212,12 @@ def stream_inventory(p):
     _m = re.search(r'Unique Document Increments:\s*(\d+)', _bfi) if _bfi and _dit and len(_dit) >= 6 else None
     if _m and struct.unpack_from('<I', _dit, 2)[0] != int(_m.group(1)):   # u32 at 2 of Global/DocumentIncrementTable == BasicFileInfo 'Unique Document Increments' in 78 of 78 local files
         out['BasicFileInfo'][1] = 'error:Unique Document Increments %s != DocumentIncrementTable %d' % (_m.group(1), struct.unpack_from('<I', _dit, 2)[0])
+    if _bfi and _hist:
+        import uuid
+        for _lab in ('Unique Document GUID', "Central model's episode GUID corresponding to the last reload latest"):
+            _g = re.search(re.escape(_lab) + r':\s*([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})', _bfi)
+            if _g and int(_g.group(1).replace('-', ''), 16) and uuid.UUID(_g.group(1)).bytes_le not in _hist:   # both GUIDs sit (little-endian) in Global/History in 25 of 25 sampled files
+                out['BasicFileInfo'][1] = 'error:%s not found in Global/History' % _lab[:20]
     return out
 def year_of(p):
     import olefile

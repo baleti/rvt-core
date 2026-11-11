@@ -146,3 +146,25 @@ class BfiIncrements(unittest.TestCase):
             f.write(data); f.flush()
             self.assertTrue(R.stream_inventory(SRC)['BasicFileInfo'][1] == 'decoded')
             self.assertTrue(R.stream_inventory(f.name)['BasicFileInfo'][1].startswith('error:Unique Document Increments'))
+
+class BfiGuid(unittest.TestCase):
+    """BasicFileInfo document GUIDs appear (little-endian) in Global/History (25 of 25 sampled files); a hex-digit flip in the ministream text must be flagged"""
+    @unittest.skipUnless(os.path.exists(SRC), 'sample absent')
+    def test_guid_flip(self):
+        import tempfile, re
+        o = olefile.OleFileIO(SRC); o.loadminifat(); raw = o.openstream('BasicFileInfo').read()
+        t = raw.decode('utf-16le', 'ignore'); a = raw[1:].decode('utf-16le', 'ignore')
+        key = 'Unique Document GUID: '.encode('utf-16le'); k = raw.find(key)
+        if k < 0: key = b'\x00' + key; k = raw.find(key)
+        self.assertGreater(k, 0); k += len(key)             # first digit's low byte (UTF-16LE)
+        ent = o.direntries[o._find('BasicFileInfo')]; chain = []; s = ent.isectStart
+        while s < 0xFFFFFFFA: chain.append(s); s = o.minifat[s]
+        root = o.direntries[0]; rc = []; s = root.isectStart
+        while s < 0xFFFFFFFA: rc.append(s); s = o.fat[s]
+        ssz, msz = o.sectorsize, o.minisectorsize
+        p = chain[k // msz] * msz; off = (rc[p // ssz] + 1) * ssz + p % ssz + k % msz
+        data = bytearray(open(SRC, 'rb').read()); self.assertIn(data[off], b'0123456789abcdef'); data[off] = ord('a') if data[off] != ord('a') else ord('b')
+        with tempfile.NamedTemporaryFile(suffix='.rte') as f:
+            f.write(data); f.flush()
+            self.assertTrue(R.stream_inventory(SRC)['BasicFileInfo'][1] == 'decoded')
+            self.assertTrue(R.stream_inventory(f.name)['BasicFileInfo'][1].startswith('error:Unique Document GUID'))
