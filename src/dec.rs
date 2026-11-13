@@ -392,6 +392,7 @@ impl<'s> Dec<'s> {
                 return Ok((Val::L(out), p));
             }
             if matches!(fl, 1 | 2 | 3) { return self.slot(b, p, fl, pend); }
+            if fl == 4 { return self.slot(b, p, 1, pend); }   // 2014-2017: flag 4 = nullable pointer slot (VarParam.m_pSubst), same as rvt_decode.py
             let rf = (reff.unwrap_or(0) & 0x7fff) as i64;
             if fl == 0x50 {
                 let n = self.u32at(b, p)?;
