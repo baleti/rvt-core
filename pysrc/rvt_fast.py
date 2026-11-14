@@ -141,9 +141,18 @@ def es_load(path):
     except Exception: pass
     return r, sch
 
+def _cfb_precheck(path):
+    """clear error for a file with CFB magic but an unreadable header/FAT (olefile otherwise leaks array/struct errors)"""
+    import olefile
+    try: olefile.OleFileIO(path).close()
+    except Exception as e:
+        if type(e).__name__ == 'NotOleFileError': raise
+        raise ValueError('corrupt CFB: header/FAT unreadable (%s: %s)' % (type(e).__name__, e))
+
 def extract(path, extra=(), only_ids=None, want_all=False, slim=None):
     """== rvt_entities.extract (same arguments, same result)"""
     import rvt_entities as E
+    _cfb_precheck(path)
     if not on(): return E.extract(path, extra=extra, only_ids=only_ids, want_all=want_all, slim=slim)
     try: return _extract(path, extra, only_ids, want_all, slim)
     except MemoryError: raise
