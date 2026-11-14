@@ -102,6 +102,16 @@ pub struct Cand {
     pub res: [Option<Out>; 2],
 }
 
+/// a misaligned ElementHeader candidate reads category, family and owner-view ids as the same positive multiple of 65536
+/// (2018 ProjectPhase 86961: 65536/65536/65536; real headers carry negative built-in category ids)
+fn false_eh(s: &Schema, r: &Rec) -> bool {
+    let g = |n: &str| s.key_of.get(n).and_then(|k| r.fields.get(*k)).and_then(|v| v.as_int());
+    match (g("m_categroryId"), g("m_familyId"), g("m_ownerViewId")) {
+        (Some(c), Some(f), Some(o)) => c > 0 && c % 65536 == 0 && c == f && c == o,
+        _ => false,
+    }
+}
+
 fn m_id_eq(s: &Schema, r: &Rec, eid: u64) -> bool {
     let k = match s.key_of.get("m_id") { Some(k) => *k, None => return false };
     match r.fields.get(k) {
@@ -145,7 +155,7 @@ pub fn decode_variant(dec: &mut Dec, chunk: &[u8], i: usize, short: bool, tag: u
             }
         }
         TagKind::Header => {
-            if r.complete && r.error.is_none() && r.id == eid { Out::Accept(r) } else { Out::Reject }
+            if r.complete && r.error.is_none() && r.id == eid && !false_eh(dec.s, &r) { Out::Accept(r) } else { Out::Reject }
         }
         TagKind::Other => Out::Skip,
     }
