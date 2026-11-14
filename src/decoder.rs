@@ -322,13 +322,16 @@ impl RecDecoder {
     /// -> ([((eid, class), rec)], [(eid, header fields)]) in first-wins order
     #[pyo3(signature = (chunk, wanted, eh_tag, only_ids=None, slim=None))]
     fn extract_chunk<'py>(&mut self, py: Python<'py>, chunk: &[u8], wanted: Vec<u32>, eh_tag: i64, only_ids: Option<Vec<u64>>, slim: Option<Vec<u32>>) -> PyResult<Bound<'py, PyTuple>> {
-        self.extract_impl(py, chunk, wanted, eh_tag, only_ids, slim)
+        // 4 pad bytes: the first record of a partition has its id at offset 0 (no A prefix); the candidate scan needs the id at i+4 (c5x-rvtread 87/90)
+        let mut padded = Vec::with_capacity(chunk.len() + 4); padded.extend_from_slice(&[0u8; 4]); padded.extend_from_slice(chunk);
+        self.extract_impl(py, &padded, wanted, eh_tag, only_ids, slim)
     }
 
     /// extract_chunk on a raw (stored) partition stream: pages stripped and members inflated here. None when the member layout is unexpected (caller falls back).
     #[pyo3(signature = (stored, wanted, eh_tag, only_ids=None, slim=None))]
     fn extract_stored<'py>(&mut self, py: Python<'py>, stored: &[u8], wanted: Vec<u32>, eh_tag: i64, only_ids: Option<Vec<u64>>, slim: Option<Vec<u32>>) -> PyResult<Option<Bound<'py, PyTuple>>> {
-        let chunk = match py.allow_threads(|| crate::joined_vec(stored)) { Some(c) => c, None => return Ok(None) };
+        let mut chunk = match py.allow_threads(|| crate::joined_vec(stored)) { Some(c) => c, None => return Ok(None) };
+        chunk.splice(0..0, [0u8; 4]);      // 4 pad bytes: first record of a partition has its id at offset 0 (c5x-rvtread 87/90)
         Ok(Some(self.extract_impl(py, &chunk, wanted, eh_tag, only_ids, slim)?))
     }
 }
