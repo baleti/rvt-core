@@ -22,4 +22,5 @@ def test_paramelemexternal_header():
     import rvt_fast
     x = rvt_fast.extract(G, want_all=True)
     assert int(x['eh'][1372251]['m_designOptionId']) != 37027840
-    assert not [e for e, f in x['eh'].items() if (1 << 31) < int(f['m_familyId']) < (1 << 32) - 1]
+    W = lambda v: (1 << 31) < int(v) < (1 << 32) - 1
+    assert not [e for e, f in x['eh'].items() if W(f['m_familyId']) or W(f['m_ownerViewId']) or W(f['m_designOptionId'])]

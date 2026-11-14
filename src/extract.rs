@@ -106,11 +106,12 @@ pub struct Cand {
 /// (2018 ProjectPhase 86961: 65536/65536/65536; real headers carry negative built-in category ids)
 fn false_eh(s: &Schema, r: &Rec) -> bool {
     let g = |n: &str| s.key_of.get(n).and_then(|k| r.fields.get(*k)).and_then(|v| v.as_int());
-    match (g("m_categroryId"), g("m_familyId"), g("m_ownerViewId")) {
-        (Some(c), Some(f), Some(o)) if c > 0 && c % 65536 == 0 && c == f && c == o => true,
-        (_, Some(f), _) => f > (1i128 << 31) && f < (1i128 << 32) - 1,
-        _ => false,
+    let (c, f, o, d) = (g("m_categroryId"), g("m_familyId"), g("m_ownerViewId"), g("m_designOptionId"));
+    if let (Some(c), Some(f), Some(o)) = (c, f, o) {
+        if c > 0 && c % 65536 == 0 && c == f && c == o { return true; }
     }
+    // family / owner view / design option id between 2^31 and 0xFFFFFFFF(-1): see rvt_entities.false_eh
+    [f, o, d].iter().any(|v| matches!(v, Some(v) if *v > (1i128 << 31) && *v < (1i128 << 32) - 1))
 }
 
 fn m_id_eq(s: &Schema, r: &Rec, eid: u64) -> bool {
