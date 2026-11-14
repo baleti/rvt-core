@@ -107,7 +107,8 @@ pub struct Cand {
 fn false_eh(s: &Schema, r: &Rec) -> bool {
     let g = |n: &str| s.key_of.get(n).and_then(|k| r.fields.get(*k)).and_then(|v| v.as_int());
     match (g("m_categroryId"), g("m_familyId"), g("m_ownerViewId")) {
-        (Some(c), Some(f), Some(o)) => c > 0 && c % 65536 == 0 && c == f && c == o,
+        (Some(c), Some(f), Some(o)) if c > 0 && c % 65536 == 0 && c == f && c == o => true,
+        (_, Some(f), _) => f > (1i128 << 31) && f < (1i128 << 32) - 1,
         _ => false,
     }
 }
