@@ -1,6 +1,7 @@
 """Rust fast paths for the reader in ~/rvt-research (session 176's Python stays the reference oracle and the fallback).
 Every function here has the SAME signature and result as the oracle function it replaces; differential tests in ~/src/rvt-core/tests.
 RVT_NOFAST=1 (or a missing extension, or any experiment/hint configuration) -> the oracle function is called instead."""
+import collections.abc
 import os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 READER = os.environ.get('RVT_READER_DIR', os.path.expanduser('~/rvt-research'))
@@ -275,6 +276,23 @@ def _partitions(o, rd, wl, EH, oid, slim_tags, recs, eh, T, progress=None):
     return True
 
 # ---------------- channel-103 saved graphics (g103_get) ----------------
+class _Index(collections.abc.Mapping):
+    """eid -> index entry dict, stored as tuples (2.4M entries of dicts were ~19 GB on a 984 MB file); entry dicts are rebuilt on access, same keys and values as before"""
+    __slots__ = ('t', 'pns', 'pnid', 'bod')
+    def __init__(s): s.t = {}; s.pns = []; s.pnid = {}; s.bod = {}
+    def put(s, eid, pn, gi, off, bb, tb, et, bodies, size, complete):
+        p = s.pnid.get(pn)
+        if p is None: p = s.pnid[pn] = len(s.pns); s.pns.append(pn)
+        b = tuple(bodies); b = s.bod.setdefault(b, b)          # a handful of distinct body lists: shared
+        s.t[eid] = (p, gi, off, bb, tb, et, b, size, complete)
+    def __getitem__(s, eid):
+        p, gi, off, bb, tb, et, b, size, complete = s.t[eid]
+        return dict(pn=s.pns[p], seg=gi, off=off, bbox=bb, tight=tb, etype=et, bodies=dict(b), size=size, complete=complete)
+    def __iter__(s): return iter(s.t)
+    def __len__(s): return len(s.t)
+    def __contains__(s, eid): return eid in s.t
+
+
 class G103:
     """per-file state: RecDecoder with every channel-103 group buffer loaded, and the index"""
     def __init__(s, f):
@@ -282,13 +300,13 @@ class G103:
         o, cls, ids = S.load(f); W = S.id_size(cls); sch = D.Schema(cls)
         try: es = es_load(f)[0]
         except Exception: es = {}
-        s.f = f; s.W = W; s.sch = sch; s.rd = make_recdecoder(sch, W, es); s.index = {}
+        s.f = f; s.W = W; s.sch = sch; s.rd = make_recdecoder(sch, W, es); s.index = _Index()
         import gc
         gc_was = gc.isenabled(); gc.disable()
         try:
             for pn in sorted(n for n in ['/'.join(e) for e in o.listdir(streams=True)] if n.startswith('Partitions/')):
                 for (eid, gi, off, bb, tb, et, bodies, size, complete) in s.rd.g103_load(pn, o.openstream(pn).read()):
-                    s.index[eid] = dict(pn=pn, seg=gi, off=off, bbox=bb, tight=tb, etype=et, bodies=dict(bodies), size=size, complete=complete)
+                    s.index.put(eid, pn, gi, off, bb, tb, et, bodies, size, complete)
         finally:
             if gc_was: gc.enable()
     def record(s, info):

@@ -54,7 +54,7 @@ fn tri_mats(kk: &K, t: &Tess, g: &Val, keys: &mut Vec<(Val, Val)>, face_key: &mu
 pub struct Ctx {
     pub s: Arc<Schema>,
     pub kk: K,
-    pub index: FxHashMap<u64, (Arc<Vec<u8>>, usize)>,
+    pub store: Arc<crate::g103::Store>,
     pub cls: FxHashMap<u64, String>,
     pub ws: FxHashMap<u64, i64>,
     recs: Mutex<FxHashMap<u64, Arc<Rs<Option<Val>>>>>,
@@ -151,9 +151,9 @@ fn round3i(p: V3) -> [i64; 3] { [(p[0] * 1e3).round_ties_even() as i64, (p[1] * 
 fn sig(t: &Tri) -> [[i64; 3]; 3] { let mut s = [round3i(t[0]), round3i(t[1]), round3i(t[2])]; s.sort(); s }
 
 impl Ctx {
-    pub fn new(s: Arc<Schema>, index: FxHashMap<u64, (Arc<Vec<u8>>, usize)>, cls: FxHashMap<u64, String>, ws: FxHashMap<u64, i64>) -> Ctx {
+    pub fn new(s: Arc<Schema>, store: Arc<crate::g103::Store>, cls: FxHashMap<u64, String>, ws: FxHashMap<u64, i64>) -> Ctx {
         let kk = K::new(&s);
-        Ctx { s, kk, index, cls, ws, recs: Mutex::new(FxHashMap::default()), memo: Mutex::new(FxHashMap::default()) }
+        Ctx { s, kk, store, cls, ws, recs: Mutex::new(FxHashMap::default()), memo: Mutex::new(FxHashMap::default()) }
     }
 
     fn cls_of(&self, v: Option<&Val>) -> Option<&str> {
@@ -165,12 +165,12 @@ impl Ctx {
     /// doc.rec(eid)['fields'] (resolved), None when the element has no channel-103 record; Err when get_record raises
     pub fn rec(&self, eid: u64) -> Arc<Rs<Option<Val>>> {
         if let Some(r) = self.recs.lock().unwrap().get(&eid) { return r.clone(); }
-        let r = match self.index.get(&eid) {
+        let r = match self.store.lookup(eid) {
             None => Ok(None),
             Some((buf, off)) => {
                 let mut d = Dec::new(&self.s);
                 d.quiet = true;
-                match d.record(buf, *off, false) { Ok((r, _)) => Ok(Some(resolve_rec(r))), Err(_) => Err(Raise) }
+                match d.record(&buf, off, false) { Ok((r, _)) => Ok(Some(resolve_rec(r))), Err(_) => Err(Raise) }
             }
         };
         let r = Arc::new(r);

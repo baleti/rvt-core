@@ -2,6 +2,7 @@
 use crate::dec::{Dec, Rec, Schema};
 use flate2::{Decompress, FlushDecompress, Status};
 use rayon::prelude::*;
+use std::sync::Arc;
 
 pub const GZ4: [u8; 4] = [0x1f, 0x8b, 0x08, 0x00];
 
@@ -150,4 +151,154 @@ pub fn chain(s: &Schema, buf: &[u8]) -> Vec<Entry> {
         }
     }
     out
+}
+
+/// Lazy channel-103 group store: the compressed partition bytes stay resident, group buffers are inflated on demand and kept in a byte-capped LRU
+/// (RVT_G103_CACHE_MB, default 768; RVT_G103_EAGER=1 keeps every buffer like before). Resident size ~ compressed file instead of the inflated channel.
+pub struct GroupRef {
+    pub part: Arc<Vec<u8>>,
+    pub starts: Vec<usize>,
+}
+
+struct Cache {
+    map: rustc_hash::FxHashMap<(u32, usize), (Arc<Vec<u8>>, u64)>,
+    bytes: usize,
+    cap: usize,
+    tick: u64,
+}
+
+pub struct Store {
+    parts: std::sync::RwLock<rustc_hash::FxHashMap<String, u32>>,
+    groups: std::sync::RwLock<rustc_hash::FxHashMap<(u32, usize), Arc<GroupRef>>>,
+    idx: std::sync::RwLock<rustc_hash::FxHashMap<u64, (u32, usize, usize)>>,
+    cache: std::sync::Mutex<Cache>,
+    pub eager: bool,
+}
+
+impl Store {
+    pub fn new() -> Store {
+        let eager = std::env::var("RVT_G103_EAGER").map(|v| v == "1").unwrap_or(false);
+        let mb: usize = std::env::var("RVT_G103_CACHE_MB").ok().and_then(|v| v.parse().ok()).unwrap_or(768);
+        let cap = if eager { usize::MAX } else { mb << 20 };
+        Store {
+            parts: Default::default(),
+            groups: Default::default(),
+            idx: Default::default(),
+            cache: std::sync::Mutex::new(Cache { map: Default::default(), bytes: 0, cap, tick: 0 }),
+            eager,
+        }
+    }
+
+    pub fn part_id(&self, pn: &str) -> u32 {
+        let mut p = self.parts.write().unwrap();
+        let n = p.len() as u32;
+        *p.entry(pn.to_string()).or_insert(n)
+    }
+
+    pub fn find_part(&self, pn: &str) -> Option<u32> { self.parts.read().unwrap().get(pn).copied() }
+
+    pub fn add_group(&self, part: u32, gi: usize, g: GroupRef, eager_buf: Option<Vec<u8>>) {
+        self.groups.write().unwrap().insert((part, gi), Arc::new(g));
+        if let (true, Some(b)) = (self.eager, eager_buf) { self.cache_put((part, gi), Arc::new(b)); }
+    }
+
+    pub fn set_idx(&self, id: u64, part: u32, gi: usize, off: usize) { self.idx.write().unwrap().insert(id, (part, gi, off)); }
+
+    fn cache_put(&self, k: (u32, usize), b: Arc<Vec<u8>>) {
+        let mut c = self.cache.lock().unwrap();
+        c.tick += 1;
+        let t = c.tick;
+        c.bytes += b.len();
+        if let Some((old, _)) = c.map.insert(k, (b, t)) { c.bytes -= old.len(); }
+        while c.bytes > c.cap && c.map.len() > 1 {
+            let victim = c.map.iter().filter(|(kk, _)| **kk != k).min_by_key(|(_, v)| v.1).map(|(kk, _)| *kk);
+            match victim { Some(v) => { let (b, _) = c.map.remove(&v).unwrap(); c.bytes -= b.len(); } None => break }
+        }
+    }
+
+    /// group buffer (4 zero bytes + joined members), inflated now when it is not cached
+    pub fn buf(&self, part: u32, gi: usize) -> Option<Arc<Vec<u8>>> {
+        {
+            let mut c = self.cache.lock().unwrap();
+            c.tick += 1;
+            let t = c.tick;
+            if let Some(e) = c.map.get_mut(&(part, gi)) { e.1 = t; return Some(e.0.clone()); }
+        }
+        let g = self.groups.read().unwrap().get(&(part, gi))?.clone();
+        let mut b: Vec<u8> = vec![0, 0, 0, 0];
+        for &st in &g.starts {
+            let (o, _, _) = inflate(&g.part[(st + 10).min(g.part.len())..])?;
+            b.extend_from_slice(&o);
+        }
+        let a = Arc::new(b);
+        self.cache_put((part, gi), a.clone());
+        Some(a)
+    }
+
+    pub fn lookup(&self, id: u64) -> Option<(Arc<Vec<u8>>, usize)> {
+        let (p, gi, off) = *self.idx.read().unwrap().get(&id)?;
+        Some((self.buf(p, gi)?, off))
+    }
+}
+
+/// spans of the members of a partition without keeping their output (pass 1 of the chunked loader): same checks and gap metadata as members_par, None when
+/// the layout is not the regular one (the caller then takes the eager path)
+pub struct MemberMeta {
+    pub start: usize,
+    pub span_end: usize,
+    pub ch: Option<u64>,
+    pub fl: u32,
+}
+
+pub fn members_meta(data: &[u8]) -> Option<Vec<MemberMeta>> {
+    let mut spans = vec![];
+    let mut pos = 0usize;
+    while let Some(k) = memchr::memmem::find(&data[pos..], &GZ4) {
+        let i = pos + k;
+        if i < 24 { return None; }
+        let size = u32::from_le_bytes(data[i - 16..i - 12].try_into().ok()?) as usize;
+        if size < 18 || i + size - 8 > data.len() { return None; }
+        spans.push((i, i + size - 8));
+        pos = i + size - 8;
+    }
+    let used: Vec<Option<usize>> = crate::pool::run(|| spans
+        .par_iter()
+        .map(|&(a, e)| match inflate(&data[a + 10..e]) {
+            Some((o, u, true)) if u + 8 >= e - a - 10 => { drop(o); Some(a + 10 + u) }
+            _ => None,
+        })
+        .collect());
+    let mut res = Vec::with_capacity(spans.len());
+    let mut last_end = 0;
+    for (k, ((a, e), u)) in spans.iter().zip(used).enumerate() {
+        let end = u?;
+        let next = memchr::memmem::find(&data[end..], &GZ4).map(|x| x + end);
+        if next != spans.get(k + 1).map(|s| s.0) { return None; }
+        let (ch, fl) = gap_meta(data, last_end, *a);
+        res.push(MemberMeta { start: *a, span_end: *e, ch, fl });
+        last_end = end;
+    }
+    Some(res)
+}
+
+pub fn groups_meta(ms: &[MemberMeta]) -> Vec<(Option<u64>, Vec<usize>)> {
+    let mut out = vec![];
+    let mut cur: Option<(Option<u64>, Vec<usize>)> = None;
+    for (k, m) in ms.iter().enumerate() {
+        if cur.is_none() { cur = Some((m.ch, vec![])); }
+        cur.as_mut().unwrap().1.push(k);
+        if m.fl & 2 == 0 { out.push(cur.take().unwrap()); }
+    }
+    if let Some(c) = cur { out.push(c); }
+    out
+}
+
+/// group buffer (4 zero bytes + joined members) inflated from the compressed partition; None if a member does not inflate to its span
+pub fn group_buf_meta(data: &[u8], ms: &[MemberMeta], ks: &[usize]) -> Option<Vec<u8>> {
+    let mut b: Vec<u8> = vec![0, 0, 0, 0];
+    for &k in ks {
+        let m = &ms[k];
+        match inflate(&data[m.start + 10..m.span_end]) { Some((o, _, true)) => b.extend_from_slice(&o), _ => return None }
+    }
+    Some(b)
 }

@@ -16,10 +16,8 @@ pub struct RecDecoder {
     desync_type: Py<PyAny>,
     strcap: usize,
     ids: Option<(Vec<u64>, IdSet)>,
-    /// channel-103 group buffers (4 zero bytes + joined members) by (partition name, group index)
-    pub g103: rustc_hash::FxHashMap<(String, usize), Arc<Vec<u8>>>,
-    /// element id -> (group buffer, offset) of its channel-103 record (last definition wins, like build_index's dict)
-    pub g103_idx: rustc_hash::FxHashMap<u64, (Arc<Vec<u8>>, usize)>,
+    /// lazy channel-103 store: compressed partitions + member starts per group, group buffers inflated on demand (LRU); element id -> (part, group, offset), last definition wins
+    pub store: Arc<crate::g103::Store>,
     /// binary-cache sink: serialised partition blocks of extract_* calls while active
     sink: Option<Vec<u8>>,
     writer: Option<std::thread::JoinHandle<std::io::Result<()>>>,
@@ -84,6 +82,27 @@ impl RecDecoder {
     }
 }
 
+
+impl RecDecoder {
+    #[allow(clippy::too_many_arguments)]
+    fn g103_emit(&self, py: Python<'_>, s: &Schema, gi: usize, es: &[crate::g103::Entry], out: &Bound<'_, PyList>, k_bb: Option<u32>, k_tb: Option<u32>, k_et: Option<u32>) -> PyResult<()> {
+        for e in es {
+            let r = &e.rec;
+            let pick = |k: Option<u32>| -> PyResult<PyObject> {
+                match k.and_then(|k| r.fields.get(k)) { Some(v) => self.conv.val(py, v, &r.slots), None => Ok(py.None()) }
+            };
+            let mut cnt: Vec<(String, usize)> = vec![];
+            for t in r.bodies.as_ref().unwrap() {
+                let n = s.cname(*t);
+                match cnt.iter_mut().find(|(m, _)| *m == n) { Some(c) => c.1 += 1, None => cnt.push((n, 1)) }
+            }
+            let t = PyTuple::new_bound(py, [r.id.into_py(py), gi.into_py(py), e.off.into_py(py), pick(k_bb)?, pick(k_tb)?, pick(k_et)?, cnt.into_py(py), e.size.into_py(py), r.complete.into_py(py)]);
+            out.append(t)?;
+        }
+        Ok(())
+    }
+}
+
 #[pymethods]
 impl RecDecoder {
     /// classes: list of dicts as produced by fmt_parser.parse; eid_type = rvt_decode.EID; desync_type = rvt_decode.Desync
@@ -91,7 +110,7 @@ impl RecDecoder {
     fn new(py: Python<'_>, classes: &Bound<'_, PyList>, idsize: usize, stop: Vec<String>, strcap: usize, eid_type: Py<PyAny>, desync_type: Py<PyAny>) -> PyResult<Self> {
         let s = Schema::new(classes_from_py(classes)?, idsize, &stop, strcap);
         let conv = Conv::new(py, &s, eid_type);
-        Ok(RecDecoder { schema: Arc::new(s), conv, desync_type, strcap, ids: None, g103: Default::default(), g103_idx: Default::default(), sink: None, writer: None, kept: None })
+        Ok(RecDecoder { schema: Arc::new(s), conv, desync_type, strcap, ids: None, store: Arc::new(crate::g103::Store::new()), sink: None, writer: None, kept: None })
     }
 
     /// es_schemas: {guid_hex: {'m_fields': [{'m_entryIndex','m_containerType','m_fieldTypeName','m_fieldName'}]}}
@@ -120,43 +139,73 @@ impl RecDecoder {
     /// [(id, group index, off, m_bBox, m_tightbBox, m_gElemType, [(body class, count)], size, complete)] in decode order
     fn g103_load<'py>(&mut self, py: Python<'py>, pn: String, stored: &[u8]) -> PyResult<Bound<'py, PyList>> {
         let s = self.schema.clone();
-        let (bufs, entries) = py.allow_threads(|| {
+        let k_bb = s.key_of.get("m_bBox").copied();
+        let k_tb = s.key_of.get("m_tightbBox").copied();
+        let k_et = s.key_of.get("m_gElemType").copied();
+        let part = self.store.part_id(&pn);
+        // chunked path: spans first (no output kept), then groups inflated and chained a chunk at a time, buffers dropped after each chunk (peak = one chunk, not the partition)
+        if !self.store.eager && std::env::var("RVT_G103_EAGER_LOAD").map(|v| v != "1").unwrap_or(true) {
+            let plan = py.allow_threads(|| {
+                let data = crate::strip_pages_impl(stored);
+                let mm = crate::g103::members_meta(&data)?;
+                let gs = crate::g103::groups_meta(&mm);
+                Some((data, mm, gs))
+            });
+            if let Some((data, mm, gs)) = plan {
+                let data = Arc::new(data);
+                let gl: Vec<(usize, Vec<usize>)> = gs.iter().enumerate().filter(|(_, (ch, _))| *ch == Some(103)).map(|(gi, (_, ks))| (gi, ks.clone())).collect();
+                let chunk_c: usize = std::env::var("RVT_G103_CHUNK_MB").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(32) << 20;
+                let out = PyList::empty_bound(py);
+                let mut ok = true;
+                let mut i = 0;
+                while i < gl.len() && ok {
+                    let mut j = i; let mut sz = 0usize;
+                    while j < gl.len() && (sz < chunk_c || j == i) { sz += gl[j].1.iter().map(|&k| mm[k].span_end - mm[k].start).sum::<usize>(); j += 1; }
+                    let chunk = &gl[i..j];
+                    let res: Vec<Option<(usize, Vec<crate::g103::Entry>)>> = py.allow_threads(|| crate::pool::run(|| chunk.par_iter().map(|(gi, ks)| {
+                        let b = crate::g103::group_buf_meta(&data, &mm, ks)?;
+                        Some((*gi, crate::g103::chain(&s, &b)))
+                    }).collect()));
+                    for r in res {
+                        match r {
+                            None => { ok = false; break; }
+                            Some((gi, es)) => {
+                                self.g103_emit(py, &s, gi, &es, &out, k_bb, k_tb, k_et)?;
+                                for e in &es { self.store.set_idx(e.rec.id, part, gi, e.off); }
+                            }
+                        }
+                    }
+                    i = j;
+                }
+                if ok {
+                    for (gi, ks) in gl { let st: Vec<usize> = ks.iter().map(|&k| mm[k].start).collect(); self.store.add_group(part, gi, crate::g103::GroupRef { part: data.clone(), starts: st }, None); }
+                    return Ok(out);
+                }
+            }
+        }
+        let (bufs, entries, data, starts) = py.allow_threads(|| {
             let data = crate::strip_pages_impl(stored);
             let ms = crate::g103::members(&data);
             let gs = crate::g103::groups(&ms);
             let bufs: Vec<(usize, Vec<u8>)> = gs.iter().enumerate().filter(|(_, (ch, _))| *ch == Some(103)).map(|(gi, (_, ks))| (gi, crate::g103::group_buf(&ms, ks))).collect();
+            let starts: Vec<(usize, Vec<usize>)> = gs.iter().enumerate().filter(|(_, (ch, _))| *ch == Some(103)).map(|(gi, (_, ks))| (gi, ks.iter().map(|&k| ms[k].start).collect())).collect();
             drop(ms);
             let entries: Vec<(usize, Vec<crate::g103::Entry>)> = crate::pool::run(|| bufs.par_iter().map(|(gi, b)| (*gi, crate::g103::chain(&s, b))).collect());
-            (bufs, entries)
+            (bufs, entries, data, starts)
         });
-        let k_bb = s.key_of.get("m_bBox").copied();
-        let k_tb = s.key_of.get("m_tightbBox").copied();
-        let k_et = s.key_of.get("m_gElemType").copied();
         let out = PyList::empty_bound(py);
-        for (gi, es) in entries.iter() {
-            for e in es {
-                let r = &e.rec;
-                let pick = |k: Option<u32>| -> PyResult<PyObject> {
-                    match k.and_then(|k| r.fields.get(k)) { Some(v) => self.conv.val(py, v, &r.slots), None => Ok(py.None()) }
-                };
-                let mut cnt: Vec<(String, usize)> = vec![];
-                for t in r.bodies.as_ref().unwrap() {
-                    let n = s.cname(*t);
-                    match cnt.iter_mut().find(|(m, _)| *m == n) { Some(c) => c.1 += 1, None => cnt.push((n, 1)) }
-                }
-                let t = PyTuple::new_bound(py, [r.id.into_py(py), gi.into_py(py), e.off.into_py(py), pick(k_bb)?, pick(k_tb)?, pick(k_et)?, cnt.into_py(py), e.size.into_py(py), r.complete.into_py(py)]);
-                out.append(t)?;
-            }
-        }
-        let mut arcs: rustc_hash::FxHashMap<usize, Arc<Vec<u8>>> = Default::default();
-        for (gi, b) in bufs { let a = Arc::new(b); self.g103.insert((pn.clone(), gi), a.clone()); arcs.insert(gi, a); }
-        for (gi, es) in entries.iter() { for e in es { self.g103_idx.insert(e.rec.id, (arcs[gi].clone(), e.off)); } }
+        for (gi, es) in entries.iter() { self.g103_emit(py, &s, *gi, es, &out, k_bb, k_tb, k_et)?; }
+        let data = Arc::new(data);
+        let mut bm: rustc_hash::FxHashMap<usize, Vec<u8>> = bufs.into_iter().collect();
+        for (gi, st) in starts { let eb = if self.store.eager { bm.remove(&gi) } else { None }; self.store.add_group(part, gi, crate::g103::GroupRef { part: data.clone(), starts: st }, eb); }
+        drop(bm);
+        for (gi, es) in entries.iter() { for e in es { self.store.set_idx(e.rec.id, part, *gi, e.off); } }
         Ok(out)
     }
 
     /// g103_get.get_record: the record at `off` of channel-103 group `gi` of partition `pn` (None if that group is not loaded)
     fn g103_record<'py>(&self, py: Python<'py>, pn: String, gi: usize, off: usize) -> PyResult<Option<Bound<'py, PyDict>>> {
-        let b = match self.g103.get(&(pn, gi)) { Some(b) => b.clone(), None => return Ok(None) };
+        let b = match self.store.find_part(&pn).and_then(|p| self.store.buf(p, gi)) { Some(b) => b, None => return Ok(None) };
         let s = self.schema.clone();
         let mut d = Dec::new(&s);
         d.strcap = self.strcap;
@@ -181,7 +230,7 @@ impl RecDecoder {
         for (k, v) in cls.iter() { c.insert(k.extract()?, v.extract()?); }
         let mut w: rustc_hash::FxHashMap<u64, i64> = Default::default();
         for (k, v) in ws.iter() { w.insert(k.extract()?, v.extract()?); }
-        let ctx = crate::elemmesh::Ctx::new(self.schema.clone(), self.g103_idx.clone(), c, w);
+        let ctx = crate::elemmesh::Ctx::new(self.schema.clone(), self.store.clone(), c, w);
         let conv = Conv::new(py, &self.schema, self.conv.eid.clone_ref(py));
         crate::elemmesh::MeshDoc::new(py, ctx, conv)
     }
