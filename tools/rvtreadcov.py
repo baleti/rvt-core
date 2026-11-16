@@ -27,13 +27,15 @@ def chain_bad(o):
     """FAT chain of every regular (non-mini) stream must hold exactly ceil(size/sector) sectors and end with ENDOFCHAIN (0xFFFFFFFE); a last entry flipped to free/FAT-sector was accepted because the reader stops at the stream size (c1x-rvtread item 183)"""
     ss = o.sectorsize
     if o.minifat is None and o.root and o.root.size: o.loadminifat()
+    owned = {}      # (mini?, sector) -> stream name: no sector may belong to two stream chains (a start pointer re-pointed into another stream's chain was accepted, c1x-rvtread item 186)
     for i, e in enumerate(o.direntries):
         if e is None or e.entry_type != 2 or e.size == 0: continue
         mini = e.size < o.minisectorcutoff; tab = (o.minifat or []) if mini else o.fat
         need = -(-e.size // (o.minisectorsize if mini else ss)); s = e.isectStart; n = 0
         while s < 0xfffffffa and n <= need + 1:
             if s >= len(tab): return 'stream %s: chain leaves the %sFAT' % (e.name, 'mini-' if mini else '')
-            s = tab[s]; n += 1
+            if (mini, s) in owned: return 'stream %s shares %ssector %d with stream %s (cross-linked chains)' % (e.name, 'mini-' if mini else '', s, owned[(mini, s)])
+            owned[(mini, s)] = e.name; s = tab[s]; n += 1
         if s != 0xfffffffe: return 'stream %s: chain does not end with ENDOFCHAIN (ends 0x%x after %d sectors)' % (e.name, s, n)
         if n != need: return 'stream %s: chain has %d sectors, size needs %d' % (e.name, n, need)
     return None

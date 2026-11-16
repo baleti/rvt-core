@@ -39,4 +39,15 @@ class ChainEnd(unittest.TestCase):
                 b = bytearray(raw); struct.pack_into('<I', b, (mf[last // (ss // 4)] + 1) * ss + 4 * (last % (ss // 4)), val); n += 1
                 with self.assertRaises(ValueError): self.chk(b)
         self.assertGreater(n, 4)
+    def test_start_pointer_into_other_chain(self):
+        import olefile
+        S71 = (glob.glob(os.path.expanduser('~/rvt-research/corpus/2024/71_*.rte')) or [None])[0]
+        if not S71: self.skipTest('71 sample absent')
+        raw = open(S71, 'rb').read(); o = olefile.OleFileIO(S71); ss = o.sectorsize
+        ds = []; s = o.first_dir_sector
+        while s < 0xfffffffa: ds.append(s); s = o.fat[s]
+        eo = lambda sid: (ds[sid // (ss // 128)] + 1) * ss + (sid % (ss // 128)) * 128
+        e1 = o._find(['Contents']); e2 = o._find(next(x for x in o.listdir() if x[0] == 'Partitions'))
+        b = bytearray(raw); struct.pack_into('<I', b, eo(e1) + 116, o.direntries[e2].isectStart)
+        with self.assertRaises(ValueError): self.chk(b)
 if __name__ == '__main__': unittest.main()
