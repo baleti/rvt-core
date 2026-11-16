@@ -23,6 +23,18 @@ def minifat_header_bad(o):
     while s < 0xfffffffa and s not in seen and s < len(o.fat): seen.add(s); s = o.fat[s]
     if len(seen) > n: return 'mini-FAT chain has %d sectors but the header declares %d' % (len(seen), n)
     return None
+def chain_bad(o):
+    """FAT chain of every regular (non-mini) stream must hold exactly ceil(size/sector) sectors and end with ENDOFCHAIN (0xFFFFFFFE); a last entry flipped to free/FAT-sector was accepted because the reader stops at the stream size (c1x-rvtread item 183)"""
+    ss = o.sectorsize
+    for i, e in enumerate(o.direntries):
+        if e is None or e.entry_type != 2 or e.size < o.minisectorcutoff: continue
+        need = -(-e.size // ss); s = e.isectStart; n = 0
+        while s < 0xfffffffa and n <= need + 1:
+            if s >= len(o.fat): return 'stream %s: chain leaves the FAT' % e.name
+            s = o.fat[s]; n += 1
+        if s != 0xfffffffe: return 'stream %s: chain does not end with ENDOFCHAIN (ends 0x%x after %d sectors)' % (e.name, s, n)
+        if n != need: return 'stream %s: chain has %d sectors, size needs %d' % (e.name, n, need)
+    return None
 def dirtree_bad(o):
     """CFB directory tree from the raw directory sectors: every in-use entry must be reachable exactly once from the root via child/left/right, no cycles (a flipped sibling/child pointer silently hides or duplicates a stream; olefile only loads reachable entries so it cannot see this)"""
     import struct
@@ -174,6 +186,8 @@ def stream_inventory(p):
     if truncated(o, p): raise ValueError('file truncated: directory needs more sectors than the file holds')
     _t = dirtree_bad(o)
     if _t: raise ValueError('CFB directory: ' + _t)
+    _c = chain_bad(o)
+    if _c: raise ValueError('CFB FAT: ' + _c)
     _m = minifat_header_bad(o)
     if _m: raise ValueError('CFB header: ' + _m)
     for e in o.listdir(streams=True, storages=False):
