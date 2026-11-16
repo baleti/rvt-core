@@ -23,4 +23,20 @@ class ChainEnd(unittest.TestCase):
                 b = bytearray(raw); struct.pack_into('<I', b, (fats[last // (ss // 4)] + 1) * ss + 4 * (last % (ss // 4)), val); n += 1
                 with self.assertRaises(ValueError): self.chk(b)
         self.assertGreater(n, 4)
+    def test_mini_chain_end_flip(self):
+        import olefile
+        raw = open(SRC, 'rb').read(); o = olefile.OleFileIO(SRC); ss = o.sectorsize; o.loadminifat()
+        nfat = struct.unpack_from('<I', raw, 44)[0]; fats = [struct.unpack_from('<I', raw, 76 + 4 * i)[0] for i in range(nfat)]
+        mf = []; s = o.first_mini_fat_sector
+        while s < 0xfffffffa: mf.append(s); s = o.fat[s]
+        n = 0
+        for p in o.listdir(streams=True):
+            e = o.direntries[o._find('/'.join(p))]
+            if e.size >= o.minisectorcutoff or e.size == 0: continue
+            s = e.isectStart; last = s
+            while s < 0xfffffffa: last = s; s = o.minifat[s]
+            for val in (0xffffffff, 0xfffffffd):
+                b = bytearray(raw); struct.pack_into('<I', b, (mf[last // (ss // 4)] + 1) * ss + 4 * (last % (ss // 4)), val); n += 1
+                with self.assertRaises(ValueError): self.chk(b)
+        self.assertGreater(n, 4)
 if __name__ == '__main__': unittest.main()
