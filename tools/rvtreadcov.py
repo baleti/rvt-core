@@ -194,6 +194,7 @@ def stream_inventory(p):
                 _m = [l for l in ('Worksharing:', 'Central Model Path:', 'Build:', 'Username:', 'Open Workset Default:') if l not in _t]   # present in 1115 of 1115 local files, 2017-2026
                 _y = re.search(r'Revit[^\n]*?(20\d\d)', _t)
                 if _m and not (_y and int(_y.group(1)) < 2016): raise ValueError('BasicFileInfo lacks label %s (mini-stream damage?)' % _m[0])   # pre-2016 files (outside the 1115 local 2016+ files the rule was calibrated on) legitimately lack some labels
+                if not (_y and int(_y.group(1)) < 2016) and not (raw[-2:] == b'\r\n' or raw[-4:] == b'\r\0\n\0' or raw[-3:-1] == b'\r\n'): raise ValueError('BasicFileInfo does not end with CR LF (cut short)')   # item 152: 400 of 400 random local files end with CR LF; a 50 percent or 95 percent cut read ok
                 _bfi = _t; st = 'decoded'
             elif n == 'PartAtom' and raw.lstrip(b'\xef\xbb\xbf')[:5] == b'<?xml':
                 import xml.dom.minidom as M, xml.parsers.expat as X
