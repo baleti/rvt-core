@@ -274,6 +274,8 @@ if __name__ == '__main__':
             if miss: r['open'] = 'error:ValueError missing core stream ' + ','.join(miss)[:50]
             tiny = [k for k in CORE if k in r['streams'] and r['streams'][k][0] < 64]     # item 145: an emptied core stream read ok; smallest genuine one is 82 bytes in 276 local files
             if tiny and not miss: r['open'] = 'error:ValueError core stream emptied ' + ','.join(tiny)[:50]
+            serr = [k for k in CORE if k in r['streams'] and str(r['streams'][k][1]).startswith('error')]     # item 150: a cut ElemTable (deflate never terminates) was recorded per stream but the file still read ok
+            if serr and not miss and not tiny: r['open'] = 'error:ValueError core stream damaged ' + ','.join(serr)[:50]
     except Exception as x:
         r['open'] = 'error:' + type(x).__name__ + ' ' + str(x)[:60]
     if '--records' in sys.argv and r['open'] == 'ok':
