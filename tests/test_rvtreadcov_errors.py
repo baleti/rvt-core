@@ -102,7 +102,7 @@ class MiniFatFlip(unittest.TestCase):
         for k in range(0, len(ch) - 1, 3):       # mini-FAT next pointer off by one garbles the stream; only damage that removes a label is detectable (about a third of the pointers), the rest alters values
             x = bytearray(b); x[(o.first_mini_fat_sector + 1) * ss + 4 * ch[k]] ^= 1
             f = tempfile.NamedTemporaryFile(suffix='.rvt', delete=False); f.write(x); f.close(); self.addCleanup(os.unlink, f.name)
-            r = run(f.name); caught += str(r['streams']['BasicFileInfo'][1]).startswith('error')
+            r = run(f.name); caught += r['open'] != 'ok' or str(r['streams']['BasicFileInfo'][1]).startswith('error')   # newer container rules may refuse at open, before streams are listed
         self.assertGreaterEqual(caught, 3)
 @unittest.skipUnless(SRC, 'sample corpus absent')
 class HeaderSweep(unittest.TestCase):
