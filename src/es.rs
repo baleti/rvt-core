@@ -95,16 +95,16 @@ pub fn find_schemas(s: &Schema, d: &[u8]) -> Vec<Found> {
                 (0x20..0x7f).contains(&ch) && ch2 == 0
             })
             .collect());
-        let mut ci_ = 0usize;
-        while ci_ < cands.len() {
-            let p = cands[ci_];
-            ci_ += 1;
+        
+        // every candidate attempt is independent of the others (the reference only skips candidates inside an accepted run, applied below in order),
+        // so the attempts run in parallel, one Dec per thread, and the accepted ones are then merged sequentially with the same skip rule
+        let attempt = |dec: &mut Dec, p: usize| -> Option<(Vec<Found>, usize)> {
             let q = if counted { p + 4 } else { p };
             let cnt = if counted { u(p) as usize } else { 100_000 };
             let qq2 = q + pre + 16 + post;
-            if qq2 + 4 > n { break; }
+            if qq2 + 4 > n { return None; }
             let ln = u(qq2) as usize;
-            if !(ln <= 4000 && qq2 + 4 + 2 * ln <= n && (0..ln.min(3)).all(|i| d[qq2 + 4 + 2 * i + 1] == 0 && (0x20..0x7f).contains(&d[qq2 + 4 + 2 * i]))) { continue; }
+            if !(ln <= 4000 && qq2 + 4 + 2 * ln <= n && (0..ln.min(3)).all(|i| d[qq2 + 4 + 2 * i + 1] == 0 && (0x20..0x7f).contains(&d[qq2 + 4 + 2 * i]))) { return None; }
             let mut pp = q;
             let mut got: Vec<Found> = vec![];
             let mut raised = false;
@@ -116,20 +116,27 @@ pub fn find_schemas(s: &Schema, d: &[u8]) -> Vec<Found> {
                     Ok(false) => break,
                     Err(()) => { raised = true; break; }
                 }
-                // accepted: decode the entry again with real strings
                 dec.lazy_str = false;
                 let (sc, slots) = match dec.es_entry(d, pp, pre, mid, post, ci, doc_key) { Ok((_, sc, _)) => (Val::D(sc), dec.take_slots()), Err(_) => { dec.lazy_str = true; break; } };
                 dec.lazy_str = true;
                 got.push(Found { guid: key, sc, slots });
                 pp = q2;
             }
-            if raised || got.is_empty() { continue; }
+            if raised || got.is_empty() { None } else { Some((got, pp)) }
+        };
+        let accepted: Vec<(usize, Vec<Found>, usize)> = crate::pool::run(|| cands.par_chunks(16384)
+            .flat_map_iter(|ch| {
+                let mut d2 = Dec::new(s); d2.strcap = 100_000; d2.quiet = true; d2.lazy_str = true;      // one Dec per chunk (Dec::new is not free)
+                ch.iter().filter_map(|&p| attempt(&mut d2, p).map(|(g, pp)| (p, g, pp))).collect::<Vec<_>>()
+            })
+            .collect());
+        let mut skip_to = 0usize;
+        for (p, got, pp) in accepted {
+            if p < skip_to { continue; }
             for f in got {
                 match out.iter_mut().find(|o| o.guid == f.guid) { Some(o) => { o.sc = f.sc; o.slots = f.slots; } None => out.push(f) }
             }
-            // bisect.bisect_left(cands, pp, ci)
-            let rest = &cands[ci_..];
-            ci_ += rest.partition_point(|&c| c < pp);
+            skip_to = pp;
         }
     }
     out
